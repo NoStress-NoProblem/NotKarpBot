@@ -30,7 +30,7 @@ if not TOKEN:
 PORT = int(os.environ.get("PORT", 10000))
 
 # === URL ВАШЕГО WEB APP (ЗАМЕНИТЕ НА СВОЙ!) ===
-WEB_APP_URL = "https://your-github-username.github.io/polinafit-menu/menu.html"
+WEB_APP_URL = "https://NoStress-NoProblem.github.io/polinafit-menu/menu.html"
 
 # === ФИКТИВНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
