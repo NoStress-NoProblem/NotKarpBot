@@ -28,7 +28,7 @@ if not TOKEN:
 PORT = int(os.environ.get("PORT", 10000))
 
 # === WEB APP URL (ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ!) ===
-WEB_APP_URL = "https://your-project.vercel.app/menu.html"
+WEB_APP_URL = "https://github.com/NoStress-NoProblem/polinafit-menu/blob/main/menu.html"
 
 # === HEALTH CHECK ДЛЯ RENDER ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
