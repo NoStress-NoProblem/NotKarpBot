@@ -2,6 +2,9 @@ import os
 import logging
 import gspread
 import datetime
+import asyncio
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -10,6 +13,22 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
+
+PORT = int(os.environ.get("PORT", 10000))
+
+# === ФИКТИВНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_health_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
+    server.serve_forever()
+
+# Запускаем веб-сервер в фоновом потоке
+threading.Thread(target=run_health_server, daemon=True).start()
 
 # === GOOGLE ТАБЛИЦА ===
 try:
@@ -40,7 +59,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Состояния пользователя
-USER_STATE = {}  # user_id -> состояние
+USER_STATE = {}
 
 # === КНОПКИ ===
 START_BUTTON = [["Хочу в проект 💪"]]
@@ -61,6 +80,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Готова начать? 👇",
         reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True)
     )
+
+# ... (остальной код handle_menu — без изменений, как в предыдущем исправленном варианте)
+
+# Вставьте сюда ВЕСЬ ваш исправленный код функции handle_menu из предыдущего ответа
+
+# Для краткости здесь опущен полный текст handle_menu — он должен быть таким же, как в исправленной версии выше
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -120,10 +145,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🤍 Огромный сборник простых,бюджетных рецептов\n"
             "🤍 Гайд по продуктам\n"
             "🤍 Путеводитель по питанию\n"
-            "🤍 Подробное видео с часто задаваемыми вопросами, связанные с питанием и тренировками\n\n"
-            "15 дней- 1990\n"
-            "1 месяц - 3000\n"
-            "3 месяца- 6990"
+            "🤍 Подробное видео с часто задаваемыми вопросами, связанные с питанием и тренировками\n"
         )
         await update.message.reply_photo(photo=photo_url, caption=caption)
         await update.message.reply_text(
