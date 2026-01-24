@@ -27,7 +27,7 @@ if not TOKEN:
 
 PORT = int(os.environ.get("PORT", 10000))
 
-# === WEB APP URL (ЗАМЕНИТЕ НА СВОЙ!) ===
+# === WEB APP URL (ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ!) ===
 WEB_APP_URL = "https://your-project.vercel.app/menu.html"
 
 # === HEALTH CHECK ДЛЯ RENDER ===
@@ -251,8 +251,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # Обработка Web App команды /menu (если используется)
-    if hasattr(update.message, 'web_app_data') and update.message.web_app_
+    # === ОБРАБОТКА WEB APP ===
+    if hasattr(update.message, 'web_app_data') and update.message.web_app_data is not None:
         data = update.message.web_app_data.data
         if data == "/menu":
             await update.message.reply_text(
@@ -261,7 +261,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # Обработка email
+    # === ОБРАБОТКА EMAIL ===
     if user_id in USER_STATE and USER_STATE[user_id] == "waiting_for_email":
         if "@" in text and "." in text:
             context.user_data['email'] = text
@@ -302,9 +302,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Пожалуйста, введите корректный email (например: polina@mail.ru)")
     else:
-        # Если пользователь пишет вне контекста — покажем главное меню
         await update.message.reply_text(
-            "Пожалуйста, используй кнопки ниже:",
+            "Пожалуйста, используй кнопки.",
             reply_markup=main_menu_inline()
         )
 
