@@ -11,7 +11,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
 
-# === РАБОТА С GOOGLE ТАБЛИЦЕЙ ===
+# === GOOGLE ТАБЛИЦА ===
 try:
     google_creds_json = os.getenv("GOOGLE_CREDS")
     if not google_creds_json:
@@ -28,7 +28,6 @@ try:
     CLIENT = gspread.authorize(CREDS)
     SHEET = CLIENT.open("Клиенты фитнес-бота").sheet1
     print("✅ Успешно подключено к Google Таблице!")
-
 except Exception as e:
     print(f"❌ Ошибка подключения к Google Таблице: {e}")
     SHEET = None
@@ -40,129 +39,181 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния пользователя (для сбора данных)
-USER_STATE = {}  # {user_id: "waiting_for_name" / "waiting_for_height" / "waiting_for_weight"}
+# Состояния пользователя
+USER_STATE = {}  # user_id -> состояние
 
-# Главное меню
-MAIN_MENU = [
-    [KeyboardButton("📸 Фото мне"), KeyboardButton("⭐ Отзывы")],
-    [KeyboardButton("📝 Записаться на курс"), KeyboardButton("📦 Что входит в курс")],
-    [KeyboardButton("📞 Связаться со мной")]
-]
+# === КНОПКИ ===
+START_BUTTON = [["Хочу в проект 💪"]]
+TARIFF_MENU = [["15 дней (1990 ₽)", "1 месяц (3000 ₽)"], ["3 месяца (6990 ₽)"], ["⬅️ Назад"]]
+AFTER_PAYMENT_MENU = [["Продолжить ▶️"]]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сразу показываем меню"""
+    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
+    caption = (
+        "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
+        "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
+        "Я даю рекомендации по питанию после того, как подробно изучу твой случай: "
+        "образ жизни, активность, травмы, цели.\n\n"
+        "Именно такой подход поможет тебе достичь результата — без стресса и откатов."
+    )
+    await update.message.reply_photo(photo=photo_url, caption=caption)
     await update.message.reply_text(
-        "Привет! 👋 Я помогу тебе начать путь к стройности.\nВыбери действие:",
-        reply_markup=ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+        "Готова начать? 👇",
+        reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True)
     )
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    user = update.effective_user
-    user_id = user.id
+    user_id = update.effective_user.id
 
-    if text == "📝 Записаться на курс":
-        payment_text = (
-            "Курс стоит всего **50 ₽**!\n\n"
-            "👉 Переведите 50 ₽ на номер: **+7 (914) 195-03-33** (СБП)\n"
-            "Или по ссылке: https://example.com/pay\n\n"
-            "После оплаты нажмите кнопку ниже:"
+    if text == "Хочу в проект 💪":
+        desc = (
+            "Проект POLINAFIT — это комплексная работа, где важно всё:\n\n"
+            "• Режим питания\n"
+            "• Тренировки\n"
+            "• Поддержка от участниц и лично от меня\n\n"
+            "Это место, где я доведу тебя за ручку до цели и не дам откатиться назад — "
+            "даже при отпуске, стрессе, болезни или травме.\n\n"
+            "Что входит в проект:"
+        )
+        await update.message.reply_text(desc)
+
+        features = (
+            "🤍 **Тренировки** для любого уровня: дома или в зале\n"
+            "— лёгкие (для новичков)\n"
+            "— средние (для продолжающих)\n"
+            "— интенсивные (для продвинутых)\n\n"
+            "🤍 **Питание**: индивидуальный расчёт КБЖУ + сборники завтраков/обедов/ужинов\n\n"
+            "🤍 **Индивидуальная работа**: проверка отчётов 2 раза в неделю по питанию, "
+            "2 раза в месяц — по форме\n\n"
+            "🤍 **Любая цель**: снижение, набор веса\n\n"
+            "🤍 **Закрытый чат** с участницами: поддержка, рецепты, эмоции, вопросы"
+        )
+        await update.message.reply_text(features, parse_mode="Markdown")
+
+        await update.message.reply_text(
+            "Выбери, что хочешь узнать:",
+            reply_markup=ReplyKeyboardMarkup([["Тарифы 💰", "Отзывы 🥹"]], resize_keyboard=True)
+        )
+
+    elif text == "Тарифы 💰":
+        tariff_info = (
+            "В проекте действует подписка, которая открывает тебе доступ к:\n\n"
+            "• Анализу состояния\n"
+            "• Индивидуальному расчёту КБЖУ и плану тренировок\n"
+            "• Тренировкам на любую цель\n"
+            "• Видео с техникой упражнений\n"
+            "• Еженедельному контролю\n"
+            "• Закрытому чату\n"
+            "• Сборнику бюджетных рецептов\n"
+            "• Гайду по продуктам и путеводителю по питанию\n"
+            "• FAQ-видео по питанию и тренировкам"
+        )
+        await update.message.reply_text(tariff_info)
+        await update.message.reply_photo(photo="https://i.ibb.co/F9mRf4f/Tarif.jpg")
+        await update.message.reply_text(
+            "Выбери тариф:",
+            reply_markup=ReplyKeyboardMarkup(TARIFF_MENU, resize_keyboard=True)
+        )
+
+    elif text in ["15 дней (1990 ₽)", "1 месяц (3000 ₽)", "3 месяца (6990 ₽)"]:
+        context.user_data['tariff'] = text
+        await update.message.reply_text("Пожалуйста, укажи свой email — я отправлю тебе чек после оплаты:")
+        USER_STATE[user_id] = "waiting_for_email"
+
+    elif text == "Отзывы 🥹":
+        review_photos = [
+            "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+            "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+            "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+            "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+            "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+            "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+            "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+            "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+            "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+        ]
+
+        for url in review_photos:
+            await update.message.reply_photo(photo=url)
+
+        await update.message.reply_text(
+            "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
         )
         await update.message.reply_text(
-            payment_text,
-            reply_markup=ReplyKeyboardMarkup([["✅ Оплатил"]], resize_keyboard=True)
+            "Хочешь тоже так? Жми 👇",
+            reply_markup=ReplyKeyboardMarkup([["Тарифы 💰"]], resize_keyboard=True)
         )
 
-    elif text == "✅ Оплатил":
-        # Считаем, что оплата прошла
-        links_text = (
-            "🎉 Спасибо за оплату! Вот ваши материалы:\n\n"
-            "📚 Группа с рецептами: https://t.me/recipes_group\n"
-            "📊 Планы похудения: https://t.me/plans_channel\n"
-            "💬 Обратная связь: @your_trainer\n"
-            "❓ Вопросы: https://t.me/questions_chat\n\n"
-            "Теперь ответьте на 3 вопроса для персонального расчёта:"
+    elif text == "⬅️ Назад":
+        await update.message.reply_text(
+            "Выбери, что хочешь узнать:",
+            reply_markup=ReplyKeyboardMarkup([["Тарифы 💰", "Отзывы 🥹"]], resize_keyboard=True)
         )
-        await update.message.reply_text(links_text)
-        await update.message.reply_text("1. Как вас зовут?")
-        USER_STATE[user_id] = "waiting_for_name"
 
-    elif text == "📸 Фото мне":
-        await update.message.reply_text("Вдохновляйся! Ты тоже сможешь так 💯")
+    elif user_id in USER_STATE and USER_STATE[user_id] == "waiting_for_email":
+        if "@" in text and "." in text:
+            context.user_data['email'] = text
+            del USER_STATE[user_id]
 
-    elif text == "⭐ Отзывы":
-        reviews = (
-            "💬 Анна, -12 кг за 2 месяца!\n"
-            "💬 Максим, -18 кг и больше не возвращается к старым привычкам!"
+            tariff = context.user_data['tariff']
+            duration = "15 дней" if "15" in tariff else ("1 месяц" if "1" in tariff else "3 месяца")
+
+            payment_msg = (
+                f"Поздравляю! Подписка успешно оформлена на **{duration}** 🥳\n\n"
+                "Ура! Ты в проекте! Прежде чем начать, давай обсудим организационные моменты:\n\n"
+                "1️⃣ Вступи в закрытый чат: https://t.me/plans_channel\n"
+                "2️⃣ Активируй чат со мной: @your_trainer\n\n"
+                "После этого нажми кнопку ниже:"
+            )
+            await update.message.reply_text(payment_msg, parse_mode="Markdown")
+            await update.message.reply_text(
+                "Продолжить ▶️",
+                reply_markup=ReplyKeyboardMarkup(AFTER_PAYMENT_MENU, resize_keyboard=True)
+            )
+
+            # Запись в Google Таблицу
+            if SHEET:
+                try:
+                    user = update.effective_user
+                    SHEET.append_row([
+                        str(user_id),
+                        user.username or "",
+                        "",  # имя
+                        "",  # рост
+                        "",  # вес
+                        "",  # калораж
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        context.user_data['tariff'],
+                        context.user_data['email']
+                    ])
+                except Exception as e:
+                    logger.error(f"Ошибка записи в таблицу: {e}")
+        else:
+            await update.message.reply_text("Пожалуйста, введите корректный email (например: polina@mail.ru)")
+
+    elif text == "Продолжить ▶️":
+        instruction = (
+            "Дорогая, я рада приветствовать тебя в проекте POLINAFIT! 🎉\n\n"
+            "Для начала тебе нужно:\n"
+            "1. Перейти в закрытый канал: https://t.me/recipes_group\n"
+            "2. Нажать на закреплённое сообщение «НАВИГАЦИЯ»\n"
+            "3. Выбрать «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
+            "4. Скопировать анкету, вставить сюда и заполнить\n\n"
+            "❗ Изучай материал **последовательно — сверху вниз**, чтобы ничего не пропустить.\n\n"
+            "Когда всё прочитаешь и поймёшь — жми «Продолжить»."
         )
-        await update.message.reply_text(f"Наши реальные отзывы:\n\n{reviews}")
-
-    elif text == "📦 Что входит в курс":
-        info = (
-            "✅ Индивидуальный план питания\n"
-            "✅ Еженедельные чек-апы\n"
-            "✅ Поддержка 24/7\n"
-            "✅ Группа мотивации\n"
-            "✅ Рецепты и тренировки"
+        await update.message.reply_text(instruction)
+        await update.message.reply_text(
+            "Вступай в закрытую группу со всей информацией 🫶🏻\n"
+            "👉 https://t.me/recipes_group"
         )
-        await update.message.reply_text(f"Вот что вы получите:\n\n{info}")
-
-    elif text == "📞 Связаться со мной":
-        await update.message.reply_text("Напишите мне: @your_trainer_username")
 
     else:
-        # Обработка ответов на вопросы (имя, рост, вес)
-        if user_id in USER_STATE:
-            state = USER_STATE[user_id]
-            if state == "waiting_for_name":
-                context.user_data['name'] = text
-                await update.message.reply_text("2. Ваш рост (в см)?")
-                USER_STATE[user_id] = "waiting_for_height"
-            elif state == "waiting_for_height":
-                try:
-                    height = int(text)
-                    context.user_data['height'] = height
-                    await update.message.reply_text("3. Ваш вес (в кг)?")
-                    USER_STATE[user_id] = "waiting_for_weight"
-                except ValueError:
-                    await update.message.reply_text("Пожалуйста, введите число (например: 170)")
-            elif state == "waiting_for_weight":
-                try:
-                    weight = int(text)
-                    context.user_data['weight'] = weight
-
-                    # Расчёт калоража
-                    calories = weight + (context.user_data['height'] / 2)
-                    calories = round(calories)
-
-                    # Сохранение в Google Таблицу
-                    try:
-                        SHEET.append_row([
-                            str(user_id),
-                            user.username or "",
-                            context.user_data['name'],
-                            context.user_data['height'],
-                            weight,
-                            calories,
-                            datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                        ])
-                    except Exception as e:
-                        logger.error(f"Ошибка записи в таблицу: {e}")
-
-                    # Ответ пользователю
-                    await update.message.reply_text(
-                        f"Готово! 🎯\nВаш ежедневный калораж: **{calories} ккал**\n\n"
-                        "Следуйте плану, и результат не заставит себя ждать! 💪"
-                    )
-
-                    # Очистка состояния
-                    del USER_STATE[user_id]
-
-                except ValueError:
-                    await update.message.reply_text("Пожалуйста, введите число (например: 65)")
-        else:
-            await update.message.reply_text("Пожалуйста, используйте кнопки меню.")
+        await update.message.reply_text(
+            "Пожалуйста, используй кнопки меню.",
+            reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True)
+        )
 
 def main():
     application = Application.builder().token(TOKEN).build()
