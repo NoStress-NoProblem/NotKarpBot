@@ -2,9 +2,6 @@ import os
 import logging
 import gspread
 import datetime
-import asyncio
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -13,22 +10,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
-
-PORT = int(os.environ.get("PORT", 10000))
-
-# === ФИКТИВНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def run_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
-    server.serve_forever()
-
-# Запускаем веб-сервер в фоновом потоке
-threading.Thread(target=run_health_server, daemon=True).start()
 
 # === GOOGLE ТАБЛИЦА ===
 try:
@@ -61,36 +42,56 @@ logger = logging.getLogger(__name__)
 # Состояния пользователя
 USER_STATE = {}
 
+# === ГЛОБАЛЬНОЕ МЕНЮ — ВСЕГДА ВИДИМОЕ ===
+MAIN_MENU = [
+    [KeyboardButton("🟣 Меню")]
+]
+
 # === КНОПКИ ===
 START_BUTTON = [["Хочу в проект 💪"]]
 TARIFF_MENU = [["15 дней (1990 ₽)", "1 месяц (3000 ₽)"], ["3 месяца (6990 ₽)"], ["⬅️ Назад"]]
 AFTER_PAYMENT_MENU = [["Продолжить ▶️"]]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Фото при старте — замените URL на ваше реальное фото
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
-        "Я даю рекомендации по питанию, после того как подробно изучу каждый,индивидуальный случай, "
-        "исходя из вашей ситуации, образа жизни, активности, вида деятельности , возможные травмы. "
-        "Именно такой подход поможет тебе достричь поставленной цели!"
+        "Я даю рекомендации по питанию после того, как подробно изучу твой случай: "
+        "образ жизни, активность, травмы, цели.\n\n"
+        "Именно такой подход поможет тебе достичь результата — без стресса и откатов."
     )
     await update.message.reply_photo(photo=photo_url, caption=caption)
     await update.message.reply_text(
         "Готова начать? 👇",
-        reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True, one_time_keyboard=False)
     )
 
-# ... (остальной код handle_menu — без изменений, как в предыдущем исправленном варианте)
-
-# Вставьте сюда ВЕСЬ ваш исправленный код функции handle_menu из предыдущего ответа
-
-# Для краткости здесь опущен полный текст handle_menu — он должен быть таким же, как в исправленной версии выше
+async def send_message_with_menu(update: Update, text: str):
+    """Отправляет сообщение с постоянной кнопкой 'Меню'"""
+    await update.message.reply_text(
+        text,
+        reply_markup=ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True, one_time_keyboard=False)
+    )
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
+    # Если пользователь нажал "Меню"
+    if text == "🟣 Меню":
+        await send_message_with_menu(update, "Выбери действие:")
+        await update.message.reply_text(
+            "Что хочешь сделать?",
+            reply_markup=ReplyKeyboardMarkup([
+                ["Хочу в проект 💪"],
+                ["Тарифы 💰", "Отзывы 🥹"]
+            ], resize_keyboard=True, one_time_keyboard=False)
+        )
+        return
+
+    # Остальная логика
     if text == "Хочу в проект 💪":
         desc = (
             "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
@@ -98,7 +99,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "доведу тебя за ручку до твоей цели, место где ты не откатишься назад и не потеряешь результат, "
             "если случились непредвиденные обстоятельства (отпуск,стресс,травмы,болезнь итд)"
         )
-        await update.message.reply_text(desc)
+        await send_message_with_menu(update, desc)
 
         features = (
             "Что входит в проект:\n\n"
@@ -123,12 +124,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "настраиваемся на продуктивные дни, там ты всегда можешь задать мне интересующий тебя вопрос. "
             "Ведь так важно знать,что ты не один и тебя всегда поддержат!🫂"
         )
-        await update.message.reply_text(features)
-
-        await update.message.reply_text(
-            "Выбери, что хочешь узнать:",
-            reply_markup=ReplyKeyboardMarkup([["Тарифы 💰", "Отзывы 🥹"]], resize_keyboard=True)
-        )
+        await update.message.reply_text(features, reply_markup=ReplyKeyboardMarkup([["Тарифы 💰", "Отзывы 🥹"]], resize_keyboard=True))
 
     elif text == "Тарифы 💰":
         photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
@@ -155,7 +151,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text in ["15 дней (1990 ₽)", "1 месяц (3000 ₽)", "3 месяца (6990 ₽)"]:
         context.user_data['tariff'] = text
-        await update.message.reply_text("Пожалуйста, укажи свой email — я отправлю тебе чек после оплаты:")
+        await send_message_with_menu(update, "Пожалуйста, укажи свой email — я отправлю тебе чек после оплаты:")
         USER_STATE[user_id] = "waiting_for_email"
 
     elif text == "Отзывы 🥹":
@@ -174,17 +170,16 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for url in review_photos:
             await update.message.reply_photo(photo=url)
 
-        await update.message.reply_text(
-            "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
-        )
+        await send_message_with_menu(update, "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!")
         await update.message.reply_text(
             "Хочешь тоже так? Жми 👇",
             reply_markup=ReplyKeyboardMarkup([["Тарифы 💰"]], resize_keyboard=True)
         )
 
     elif text == "⬅️ Назад":
+        await send_message_with_menu(update, "Выбери, что хочешь узнать:")
         await update.message.reply_text(
-            "Выбери, что хочешь узнать:",
+            "Что интересует?",
             reply_markup=ReplyKeyboardMarkup([["Тарифы 💰", "Отзывы 🥹"]], resize_keyboard=True)
         )
 
@@ -209,7 +204,6 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardMarkup(AFTER_PAYMENT_MENU, resize_keyboard=True)
             )
 
-            # Запись в Google Таблицу
             if SHEET:
                 try:
                     user = update.effective_user
@@ -227,7 +221,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Ошибка записи в таблицу: {e}")
         else:
-            await update.message.reply_text("Пожалуйста, введите корректный email (например: polina@mail.ru)")
+            await send_message_with_menu(update, "Пожалуйста, введите корректный email (например: polina@mail.ru)")
 
     elif text == "Продолжить ▶️":
         instruction = (
@@ -250,10 +244,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     else:
-        await update.message.reply_text(
-            "Пожалуйста, используй кнопки меню.",
-            reply_markup=ReplyKeyboardMarkup(START_BUTTON, resize_keyboard=True)
-        )
+        await send_message_with_menu(update, "Пожалуйста, используй кнопки меню.")
 
 def main():
     application = Application.builder().token(TOKEN).build()
