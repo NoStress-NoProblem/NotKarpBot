@@ -20,5 +20,4 @@ services:
       - key: PYTHONUNBUFFERED
         value: true
     healthCheckPath: /health
-    healthCheckTimeout: 30
     autoDeploy: true
