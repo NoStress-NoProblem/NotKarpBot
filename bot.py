@@ -7,7 +7,7 @@ import threading
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonCommands, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
@@ -136,14 +136,14 @@ def save_to_google_sheets(user_data: dict):
 
 # === КОМАНДЫ МЕНЮ БОТА ===
 async def set_bot_commands(application: Application):
-    """Установка команд меню бота"""
+    """Установка команд меню бота (слева от поля ввода)"""
     commands = [
         BotCommand("start", "Начать работу с ботом"),
         BotCommand("menu", "Показать главное меню"),
+        BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Показать тарифы"),
         BotCommand("reviews", "Показать отзывы"),
-        BotCommand("help", "Помощь и инструкции"),
-        BotCommand("reset", "Сбросить диалог")
+        BotCommand("help", "Помощь и инструкции")
     ]
     
     await application.bot.set_my_commands(commands)
@@ -153,8 +153,7 @@ async def set_bot_commands(application: Application):
 def get_start_keyboard():
     """Клавиатура для команды /start"""
     keyboard = [
-        [InlineKeyboardButton("Хочу в проект 💪", callback_data='want_project')],
-        [InlineKeyboardButton("📋 Меню", callback_data='show_menu')]
+        [InlineKeyboardButton("Хочу в проект 💪", callback_data='want_project')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -162,8 +161,7 @@ def get_main_menu_keyboard():
     """Основное меню после описания проекта"""
     keyboard = [
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
-        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')],
-        [InlineKeyboardButton("📋 Главное меню", callback_data='show_menu')]
+        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -173,45 +171,28 @@ def get_tariffs_keyboard():
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
         [InlineKeyboardButton("1 месяц (3000 ₽)", callback_data='tariff_30')],
         [InlineKeyboardButton("3 месяца (6990 ₽)", callback_data='tariff_90')],
-        [
-            InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main'),
-            InlineKeyboardButton("📋 Меню", callback_data='show_menu')
-        ]
+        [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_reviews_keyboard():
     """Клавиатура после отзывов"""
     keyboard = [
-        [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
-        [InlineKeyboardButton("📋 Меню", callback_data='show_menu')]
+        [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_continue_keyboard():
     """Клавиатура после оплаты"""
     keyboard = [
-        [InlineKeyboardButton("Продолжить ▶️", callback_data='continue')],
-        [InlineKeyboardButton("📋 Меню", callback_data='show_menu')]
+        [InlineKeyboardButton("Продолжить ▶️", callback_data='continue')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_cancel_keyboard():
     """Клавиатура для отмены ввода email"""
     keyboard = [
-        [InlineKeyboardButton("Отмена", callback_data='cancel')],
-        [InlineKeyboardButton("📋 Меню", callback_data='show_menu')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def get_menu_keyboard():
-    """Главное меню бота"""
-    keyboard = [
-        [InlineKeyboardButton("🚀 Начать заново", callback_data='want_project')],
-        [InlineKeyboardButton("💰 Тарифы", callback_data='tariffs')],
-        [InlineKeyboardButton("🥹 Отзывы", callback_data='reviews')],
-        [InlineKeyboardButton("❓ Помощь", callback_data='help')],
-        [InlineKeyboardButton("🔄 Сбросить", callback_data='reset')]
+        [InlineKeyboardButton("Отмена", callback_data='cancel')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -248,42 +229,64 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /menu - показать главное меню"""
-    await show_menu(update, context)
-
-async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать главное меню"""
-    if hasattr(update, 'callback_query'):
-        query = update.callback_query
-        await query.answer()
-        chat_id = query.message.chat_id
-        message = query.message
-    else:
-        chat_id = update.message.chat_id
-        message = update.message
-    
     menu_text = (
         "📋 **Главное меню POLINAFIT**\n\n"
-        "Выберите действие:\n\n"
-        "🚀 **Начать заново** - Полное описание проекта\n"
-        "💰 **Тарифы** - Посмотреть доступные тарифы\n"
-        "🥹 **Отзывы** - Посмотреть отзывы участниц\n"
-        "❓ **Помощь** - Получить помощь\n"
-        "🔄 **Сбросить** - Начать диалог заново"
+        "Доступные команды (используйте меню слева от поля ввода):\n\n"
+        "🚀 /start - Начать работу с ботом\n"
+        "📋 /menu - Показать это меню\n"
+        "💪 /project - Описание проекта\n"
+        "💰 /tariffs - Показать тарифы\n"
+        "🥹 /reviews - Показать отзывы\n"
+        "❓ /help - Помощь и инструкции\n\n"
+        "Или используйте кнопки под сообщениями ⬇️"
     )
     
-    if hasattr(update, 'callback_query'):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=menu_text,
-            reply_markup=get_menu_keyboard(),
-            parse_mode="Markdown"
-        )
-    else:
-        await message.reply_text(
-            menu_text,
-            reply_markup=get_menu_keyboard(),
-            parse_mode="Markdown"
-        )
+    await update.message.reply_text(
+        menu_text,
+        parse_mode="Markdown"
+    )
+
+async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /project - описание проекта"""
+    desc = (
+        "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
+        "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
+        "доведу тебя за ручку до твоей цели, место где ты не откатишься назад и не потеряешь результат, "
+        "если случились непредвиденные обстоятельства (отпуск,стресс,травмы,болезнь итд)"
+    )
+    
+    await update.message.reply_text(desc)
+    
+    features = (
+        "Что входит в проект:\n\n"
+        "🤍 Тренировки для любого уровня подготовки дома или в зале:\n"
+        "— легкие , для тех кто только начинает\n"
+        "— средней сложности, для тех кто уже занимается\n"
+        "— интенсивные, для тех кто тренируется регулярно и хочет прогрессировать и готов к нагрузкам\n\n"
+        "🤍 Питание:\n"
+        "индивидуальный расчет КБЖУ, исходя из ваших особенностей, активности и образа жизни, "
+        "анализ динамики и изменения расчета по необходимости большие сборники завтраков,обедов и ужинов "
+        "с указанием КБЖУ каждого блюда , для того чтобы тебе было легче подбирать рацион\n\n"
+        "🤍 Индивидуальная работа с отчетами:\n"
+        "2 раза в неделю проверяю лично отчеты по питанию, по необходимости вношу корректировки "
+        "для более эффективного результата поставленной цели\n"
+        "2 раза в месяц проверяю отчеты по форме,фиксируем замеры , на основе которых могу изменить "
+        "тренировочный план или норму КБЖУ\n\n"
+        "🤍 Абсолютно любая цель:\n"
+        "— снижение веса\n"
+        "— набор веса\n\n"
+        "🤍 Доступ к чату со всеми девочками участницами , там мы обсуждаем результаты,делимся эмоциями, "
+        "рецептами, просто болтаем и поддерживаем друг друга на протяжении каждого дня, заряжаемся позитивом, "
+        "настраиваемся на продуктивные дни, там ты всегда можешь задать мне интересующий тебя вопрос. "
+        "Ведь так важно знать,что ты не один и тебя всегда поддержат!🫂"
+    )
+    
+    await update.message.reply_text(features)
+    
+    await update.message.reply_text(
+        "Выбери, что хочешь узнать:",
+        reply_markup=get_main_menu_keyboard()
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
@@ -296,42 +299,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**Команды бота:**\n"
         "/start - Начать диалог\n"
         "/menu - Показать меню\n"
+        "/project - Описание проекта\n"
         "/tariffs - Тарифы\n"
         "/reviews - Отзывы\n"
-        "/help - Эта справка\n"
-        "/reset - Сбросить диалог"
+        "/help - Эта справка"
     )
     
-    if hasattr(update, 'callback_query'):
-        query = update.callback_query
-        await query.answer()
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=help_text,
-            parse_mode="Markdown",
-            reply_markup=get_menu_keyboard()
-        )
-    else:
-        await update.message.reply_text(
-            help_text,
-            parse_mode="Markdown",
-            reply_markup=get_menu_keyboard()
-        )
-
-async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /reset - сбросить диалог"""
-    user_id = update.effective_user.id
-    USER_STATES.pop(user_id, None)
-    context.user_data.clear()
-    
     await update.message.reply_text(
-        "✅ Диалог сброшен! Начинаем заново.\n\n"
-        "Используйте /start чтобы начать или /menu для выбора действия.",
-        reply_markup=get_menu_keyboard()
+        help_text,
+        parse_mode="Markdown"
     )
 
 async def send_project_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка описания проекта"""
+    """Отправка описания проекта - БЕЗ УДАЛЕНИЯ ПЕРВОГО СООБЩЕНИЯ"""
     query = update.callback_query
     await query.answer()
     
@@ -384,12 +364,8 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка информации о тарифах"""
-    if hasattr(update, 'callback_query'):
-        query = update.callback_query
-        await query.answer()
-        chat_id = query.message.chat_id
-    else:
-        chat_id = update.message.chat_id
+    query = update.callback_query
+    await query.answer()
     
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
@@ -409,41 +385,24 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
-        if hasattr(update, 'callback_query'):
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=photo_url,
-                caption=caption,
-                reply_markup=get_tariffs_keyboard()
-            )
-        else:
-            await update.message.reply_photo(
-                photo=photo_url,
-                caption=caption,
-                reply_markup=get_tariffs_keyboard()
-            )
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=photo_url,
+            caption=caption,
+            reply_markup=get_tariffs_keyboard()
+        )
     except Exception as e:
         logger.error(f"Ошибка отправки фото тарифов: {e}")
-        if hasattr(update, 'callback_query'):
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=caption,
-                reply_markup=get_tariffs_keyboard()
-            )
-        else:
-            await update.message.reply_text(
-                caption,
-                reply_markup=get_tariffs_keyboard()
-            )
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=caption,
+            reply_markup=get_tariffs_keyboard()
+        )
 
 async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка отзывов"""
-    if hasattr(update, 'callback_query'):
-        query = update.callback_query
-        await query.answer()
-        chat_id = query.message.chat_id
-    else:
-        chat_id = update.message.chat_id
+    query = update.callback_query
+    await query.answer()
     
     review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
@@ -456,7 +415,7 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, url in enumerate(review_photos):
         try:
             await context.bot.send_photo(
-                chat_id=chat_id,
+                chat_id=query.message.chat_id,
                 photo=url
             )
             await asyncio.sleep(0.5)
@@ -465,23 +424,74 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
     await context.bot.send_message(
-        chat_id=chat_id,
+        chat_id=query.message.chat_id,
         text="Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
     )
     
     await context.bot.send_message(
-        chat_id=chat_id,
+        chat_id=query.message.chat_id,
         text="Хочешь тоже так? Жми 👇",
         reply_markup=get_reviews_keyboard()
     )
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /tariffs"""
-    await send_tariffs(update, context)
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    caption = (
+        "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
+        "🤍 Анализ состояния для подбора питания и тренировок\n"
+        "🤍 Индивидуальный расчет КБЖУ и план тренировок, составленный лично\n"
+        "🤍 Тренировки на любую цель ( жиросжигание,силовые итп)\n"
+        "🤍 Возможность тренироваться где удобно, дома или в зале\n"
+        "🤍 Подробно расписанная техника каждого упражнения и возможность задавать вопросы по технике в общий чат\n"
+        "🤍 Контроль питания и формы каждую неделю\n"
+        "🤍 Общий чат с участницами проекта\n"
+        "🤍 Возможность задавать любые вопросы по теме питания\n"
+        "🤍 Огромный сборник простых,бюджетных рецептов\n"
+        "🤍 Гайд по продуктам\n"
+        "🤍 Путеводитель по питанию\n"
+        "🤍 Подробное видео с часто задаваемыми вопросами, связанные с питанием и тренировками\n"
+    )
+    
+    try:
+        await update.message.reply_photo(
+            photo=photo_url,
+            caption=caption,
+            reply_markup=get_tariffs_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка отправки фото тарифов: {e}")
+        await update.message.reply_text(
+            caption,
+            reply_markup=get_tariffs_keyboard()
+        )
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /reviews"""
-    await send_reviews(update, context)
+    review_photos = [
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg"
+    ]
+
+    for i, url in enumerate(review_photos):
+        try:
+            await update.message.reply_photo(photo=url)
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
+            continue
+
+    await update.message.reply_text(
+        "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
+    )
+    
+    await update.message.reply_text(
+        "Хочешь тоже так? Жми 👇",
+        reply_markup=get_reviews_keyboard()
+    )
 
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     """Обработка выбора тарифа"""
@@ -568,13 +578,6 @@ async def send_final_instructions(update: Update, context: ContextTypes.DEFAULT_
         chat_id=chat_id,
         text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 https://t.me/recipes_group"
     )
-    
-    # Добавляем кнопку меню после инструкций
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="Нужна помощь? Используйте меню:",
-        reply_markup=get_menu_keyboard()
-    )
 
 async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ввода email"""
@@ -636,10 +639,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
         'back_to_main': handle_back,
         'cancel': handle_cancel,
-        'continue': handle_continue,
-        'show_menu': show_menu,
-        'help': help_command,
-        'reset': reset_command
+        'continue': handle_continue
     }
     
     handler = handlers.get(data)
@@ -659,25 +659,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if text == "/start":
             await start(update, context)
-        elif text == "/menu" or text == "меню":
-            await show_menu(update, context)
-        elif text == "/help" or "помощь" in text or "справка" in text:
+        elif text == "/menu":
+            await menu_command(update, context)
+        elif text == "/help":
             await help_command(update, context)
-        elif text == "/reset" or "сбросить" in text:
-            await reset_command(update, context)
-        elif text == "/tariffs" or "тарифы" in text:
-            await send_tariffs(update, context)
-        elif text == "/reviews" or "отзывы" in text:
-            await send_reviews(update, context)
+        elif text == "/project":
+            await project_command(update, context)
+        elif text == "/tariffs":
+            await tariffs_command(update, context)
+        elif text == "/reviews":
+            await reviews_command(update, context)
         elif "проект" in text or "хочу" in text:
             await send_project_description_from_message(update, context)
         else:
             await update.message.reply_text(
-                "Я не понял ваше сообщение. Используйте кнопки меню или команды:\n"
+                "Я не понял ваше сообщение. Используйте меню слева от поля ввода или команды:\n"
                 "/start - Начать\n"
                 "/menu - Меню\n"
                 "/help - Помощь",
-                reply_markup=get_menu_keyboard()
+                reply_markup=get_start_keyboard()
             )
 
 async def send_project_description_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -735,7 +735,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await update.message.reply_text(
                 "Произошла ошибка. Пожалуйста, попробуйте снова или используйте /menu",
-                reply_markup=get_menu_keyboard()
+                reply_markup=get_start_keyboard()
             )
         except Exception as e:
             logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
@@ -785,14 +785,14 @@ def main():
         logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
         logger.info("=" * 50)
         
-        # Создаем Application с post_init
+        # Создаем Application с post_init для установки команд меню
         application = Application.builder().token(TOKEN).post_init(post_init).build()
         
-        # Добавляем обработчики команд
+        # Добавляем обработчики команд меню
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("menu", menu_command))
         application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("reset", reset_command))
+        application.add_handler(CommandHandler("project", project_command))
         application.add_handler(CommandHandler("tariffs", tariffs_command))
         application.add_handler(CommandHandler("reviews", reviews_command))
         application.add_handler(CommandHandler("stats", admin_stats))
