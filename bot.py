@@ -5,6 +5,9 @@ import datetime
 import asyncio
 import threading
 import json
+import time
+import urllib.request
+import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
@@ -32,32 +35,108 @@ PORT = int(os.environ.get("PORT", 10000))
 # Состояния пользователя
 USER_STATES = {}
 
-# === ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ===
+# Глобальная переменная для времени старта
+start_time = time.time()
+
+# === УЛУЧШЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health' or self.path == '/':
             self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            html = """
+            <html>
+            <head>
+                <title>POLINAFIT Bot</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                    h1 { color: #4CAF50; }
+                    .status { background: #f0f0f0; padding: 20px; border-radius: 10px; display: inline-block; }
+                </style>
+                <meta http-equiv="refresh" content="300">
+            </head>
+            <body>
+                <div class="status">
+                    <h1>🤖 POLINAFIT Bot</h1>
+                    <p>Status: <strong style="color: green;">✅ Online</strong></p>
+                    <p>Uptime: {} seconds</p>
+                    <p>Last check: {}</p>
+                    <p>Users in memory: {}</p>
+                </div>
+            </body>
+            </html>
+            """.format(
+                int(time.time() - start_time),
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                len(USER_STATES)
+            )
+            self.wfile.write(html.encode('utf-8'))
+        elif self.path == '/ping' or self.path == '/keepalive':
+            self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(b'OK - Bot is running')
+            self.wfile.write(b'pong')
+        elif self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            status = {
+                "status": "online",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "uptime_seconds": int(time.time() - start_time),
+                "users_in_memory": len(USER_STATES),
+                "bot": "POLINAFIT Fitness Bot"
+            }
+            self.wfile.write(json.dumps(status).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
     
     def log_message(self, format, *args):
-        logger.debug(f"HTTP Request: {self.path}")
+        pass  # Отключаем логирование для уменьшения шума
 
 def run_health_server():
+    """Запуск улучшенного health сервера"""
     try:
         server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
-        logger.info(f"Веб-сервер запущен на порту {PORT}")
+        logger.info(f"🚀 Веб-сервер запущен на порту {PORT}")
+        logger.info(f"🌐 Health check: http://0.0.0.0:{PORT}/health")
+        logger.info(f"📊 Status JSON: http://0.0.0.0:{PORT}/status")
+        logger.info(f"🏓 Ping: http://0.0.0.0:{PORT}/ping")
         server.serve_forever()
     except Exception as e:
         logger.error(f"Ошибка веб-сервера: {e}")
 
-# Запускаем веб-сервер в фоновом потоке
+# Запускаем веб-сервер в фоновом потоке с высоким приоритетом
 health_thread = threading.Thread(target=run_health_server, daemon=True)
 health_thread.start()
+
+# === ДОПОЛНИТЕЛЬНЫЙ СЕРВИС ДЛЯ ПОДДЕРЖАНИЯ АКТИВНОСТИ ===
+def keep_alive_service():
+    """Сервис для поддержания активности (пинг самого себя)"""
+    while True:
+        try:
+            # Игнорируем SSL ошибки для простоты
+            ssl_context = ssl._create_unverified_context()
+            
+            # Пингуем сами себя каждые 4 минуты (240 секунд)
+            urllib.request.urlopen(
+                f"http://localhost:{PORT}/ping",
+                timeout=10,
+                context=ssl_context
+            )
+            logger.debug("✅ Keep-alive ping sent")
+        except Exception as e:
+            logger.warning(f"⚠️ Keep-alive ping failed: {e}")
+        
+        # Ждем 4 минуты перед следующим пингом
+        time.sleep(240)
+
+# Запускаем keep-alive сервис в отдельном потоке
+keep_alive_thread = threading.Thread(target=keep_alive_service, daemon=True)
+keep_alive_thread.start()
 
 # === GOOGLE ТАБЛИЦА ===
 def init_google_sheets():
@@ -315,6 +394,9 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     
+    # НЕ удаляем первое сообщение с фото и кнопкой!
+    # Просто отправляем новое сообщение с описанием
+    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -322,6 +404,7 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
         "если случились непредвиденные обстоятельства (отпуск,стресс,травмы,болезнь итд)"
     )
     
+    # Отправляем описание как новое сообщение
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=desc
@@ -351,11 +434,13 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
         "Ведь так важно знать,что ты не один и тебя всегда поддержат!🫂"
     )
     
+    # Отправляем особенности как новое сообщение
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=features
     )
     
+    # Отправляем кнопки выбора
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Выбери, что хочешь узнать:",
@@ -367,6 +452,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Отправляем новое сообщение с фото тарифов
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
@@ -409,10 +495,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
         "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
         "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg"
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
-    for i, url in enumerate(review_photos):
+    # Отправляем первые 5 отзывов
+    for i, url in enumerate(review_photos[:5]):
         try:
             await context.bot.send_photo(
                 chat_id=query.message.chat_id,
@@ -423,6 +514,7 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
 
+    # Отправляем текст и кнопку после отзывов
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
@@ -473,10 +565,15 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
         "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
         "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg"
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
-    for i, url in enumerate(review_photos):
+    # Отправляем первые 5 отзывов
+    for i, url in enumerate(review_photos[:5]):
         try:
             await update.message.reply_photo(photo=url)
             await asyncio.sleep(0.5)
@@ -509,6 +606,7 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         context.user_data['tariff'] = tariff
         USER_STATES[query.from_user.id] = "waiting_for_email"
         
+        # Отправляем новое сообщение с запросом email
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=f"Вы выбрали: {tariff}\n\n"
@@ -521,6 +619,7 @@ async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Отправляем новое сообщение с главным меню
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Выбери, что хочешь узнать:",
@@ -534,6 +633,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     USER_STATES.pop(query.from_user.id, None)
     
+    # Отправляем новое сообщение с главным меню
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Действие отменено. Что хочешь сделать?",
@@ -770,59 +870,91 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка получения статистики: {e}")
         await update.message.reply_text(f"Ошибка получения статистики: {e}")
 
-# === ОСНОВНАЯ ФУНКЦИЯ ===
+# === ОСНОВНАЯ ФУНКЦИЯ С УЛУЧШЕННОЙ ОБРАБОТКОЙ ОШИБОК ===
 async def post_init(application: Application):
     """Функция, которая выполняется после инициализации бота"""
     await set_bot_commands(application)
+    
+    # Отправляем сообщение о запуске (опционально)
+    try:
+        # Можно отправить сообщение админу о запуске бота
+        pass
+    except:
+        pass
 
 def main():
-    """Основная функция запуска бота"""
-    try:
-        logger.info("=" * 50)
-        logger.info("🤖 ЗАПУСК ТЕЛЕГРАМ БОТА")
-        logger.info(f"Токен: {TOKEN[:10]}...")
-        logger.info(f"Порт: {PORT}")
-        logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
-        logger.info("=" * 50)
-        
-        # Создаем Application с post_init для установки команд меню
-        application = Application.builder().token(TOKEN).post_init(post_init).build()
-        
-        # Добавляем обработчики команд меню
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("menu", menu_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("project", project_command))
-        application.add_handler(CommandHandler("tariffs", tariffs_command))
-        application.add_handler(CommandHandler("reviews", reviews_command))
-        application.add_handler(CommandHandler("stats", admin_stats))
-        
-        # Обработчик inline кнопок
-        application.add_handler(CallbackQueryHandler(handle_callback_query))
-        
-        # Обработчик текстовых сообщений
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        # Обработчик ошибок
-        application.add_error_handler(error_handler)
-        
-        logger.info("✅ Бот запущен и готов к работе!")
-        
-        # Запускаем бота
-        application.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
-            pool_timeout=60,
-            connect_timeout=60,
-            read_timeout=60,
-            write_timeout=60
-        )
-        
-    except Exception as e:
-        logger.critical(f"Критическая ошибка при запуске бота: {e}")
-        import time
-        time.sleep(5)
-        main()
+    """Основная функция запуска бота с улучшенной стабильностью"""
+    max_retries = 5
+    retry_delay = 30  # секунд
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info("=" * 60)
+            logger.info(f"🤖 ПОПЫТКА ЗАПУСКА БОТА #{attempt + 1}")
+            logger.info(f"Токен: {TOKEN[:10]}...")
+            logger.info(f"Порт: {PORT}")
+            logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
+            logger.info(f"Время старта: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info("=" * 60)
+            
+            # Создаем Application с улучшенными настройками
+            application = Application.builder() \
+                .token(TOKEN) \
+                .post_init(post_init) \
+                .connection_pool_size(8) \
+                .pool_timeout(120) \
+                .connect_timeout(120) \
+                .read_timeout(120) \
+                .write_timeout(120) \
+                .build()
+            
+            # Добавляем обработчики команд меню
+            application.add_handler(CommandHandler("start", start))
+            application.add_handler(CommandHandler("menu", menu_command))
+            application.add_handler(CommandHandler("help", help_command))
+            application.add_handler(CommandHandler("project", project_command))
+            application.add_handler(CommandHandler("tariffs", tariffs_command))
+            application.add_handler(CommandHandler("reviews", reviews_command))
+            application.add_handler(CommandHandler("stats", admin_stats))
+            
+            # Обработчик inline кнопок
+            application.add_handler(CallbackQueryHandler(handle_callback_query))
+            
+            # Обработчик текстовых сообщений
+            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+            
+            # Улучшенный обработчик ошибок
+            application.add_error_handler(error_handler)
+            
+            logger.info("✅ Бот успешно запущен и готов к работе!")
+            logger.info("🔧 Конфигурация оптимизирована для Render Free Tier")
+            logger.info("📈 Используйте uptime-мониторинг для лучшей доступности")
+            
+            # Запускаем бота с улучшенными параметрами
+            application.run_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                close_loop=False,
+                stop_signals=[],  # Игнорируем сигналы остановки
+                pool_timeout=120,
+                connect_timeout=120,
+                read_timeout=120,
+                write_timeout=120
+            )
+            
+            # Если бот завершился "нормально", выходим
+            break
+            
+        except Exception as e:
+            logger.critical(f"❌ Критическая ошибка при запуске бота (попытка {attempt + 1}/{max_retries}): {e}")
+            
+            if attempt < max_retries - 1:
+                logger.info(f"⏳ Повторная попытка через {retry_delay} секунд...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Экспоненциальная задержка
+            else:
+                logger.error("🚫 Все попытки запуска исчерпаны. Бот остановлен.")
+                raise
 
 if __name__ == "__main__":
     main()

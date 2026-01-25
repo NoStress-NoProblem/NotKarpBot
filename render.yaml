@@ -1,9 +1,8 @@
-version: 1
 services:
   - type: web
     name: NotKarBot
     runtime: python
-    region: oregon  
+    region: oregon
     plan: free
     buildCommand: |
       pip install --upgrade pip
@@ -18,5 +17,8 @@ services:
         value: 10000
       - key: PYTHON_VERSION
         value: 3.12.8
+      - key: PYTHONUNBUFFERED
+        value: true
     healthCheckPath: /health
+    healthCheckTimeout: 30
     autoDeploy: true
