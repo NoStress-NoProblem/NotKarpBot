@@ -217,6 +217,12 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     
+    # Вместо редактирования сообщения с фото, отправляем новое сообщение
+    try:
+        await query.delete_message()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -224,7 +230,10 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
         "если случились непредвиденные обстоятельства (отпуск,стресс,травмы,болезнь итд)"
     )
     
-    await query.edit_message_text(desc)
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=desc
+    )
     
     features = (
         "Что входит в проект:\n\n"
@@ -261,6 +270,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Отправляем новое сообщение вместо редактирования
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
@@ -287,8 +297,9 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error(f"Ошибка отправки фото тарифов: {e}")
-        await query.edit_message_text(
-            caption,
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=caption,
             reply_markup=get_tariffs_keyboard()
         )
 
@@ -342,9 +353,10 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         context.user_data['tariff'] = tariff
         USER_STATES[query.from_user.id] = "waiting_for_email"
         
-        await query.edit_message_text(
-            f"Вы выбрали: {tariff}\n\n"
-            "Пожалуйста, укажи свой email — я отправлю тебе чек после оплаты:",
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"Вы выбрали: {tariff}\n\n"
+                 "Пожалуйста, укажи свой email — я отправлю тебе чек после оплаты:",
             reply_markup=get_cancel_keyboard()
         )
 
@@ -353,8 +365,9 @@ async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Выбери, что хочешь узнать:",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Выбери, что хочешь узнать:",
         reply_markup=get_main_menu_keyboard()
     )
 
@@ -365,8 +378,9 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     USER_STATES.pop(query.from_user.id, None)
     
-    await query.edit_message_text(
-        "Действие отменено. Что хочешь сделать?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Действие отменено. Что хочешь сделать?",
         reply_markup=get_main_menu_keyboard()
     )
 
