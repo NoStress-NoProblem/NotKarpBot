@@ -1,5 +1,13 @@
 .env
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
 .venv/
-.DS_Store
+*.log
+credentials.json
+service_account.json
+temp_credentials.json

@@ -1,9 +1,9 @@
 version: 1
 services:
   - type: web
-    name: telegram-fitness-bot
+    name: NotKarBot
     runtime: python
-    region: frankfurt  
+    region: oregon  
     plan: free
     buildCommand: |
       pip install --upgrade pip
@@ -12,16 +12,11 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
-        value: ваш_токен  
       - key: GOOGLE_CREDS_JSON
         sync: false
       - key: PORT
         value: 10000
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.12.8
     healthCheckPath: /health
     autoDeploy: true
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
