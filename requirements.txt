@@ -1,4 +1,13 @@
-python-telegram-bot==20.7
-gspread==5.12
+# Telegram Bot
+python-telegram-bot[job-queue]==20.7
+
+# Google Sheets
+gspread==5.12.0
 oauth2client==4.1.3
-httpx==0.26.0
+
+# HTTP клиент (совместимая версия)
+httpx==0.25.2
+
+# Дополнительные полезные библиотеки
+python-dotenv==1.0.0
+pytz==2024.1
