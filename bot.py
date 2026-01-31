@@ -3,10 +3,8 @@ import logging
 import gspread
 import datetime
 import asyncio
-import threading
 import json
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -15,7 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[logging.StreamHandler()]  # Только консоль (экономия диска на бесплатном хостинге)
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -26,17 +24,14 @@ if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
 
 PORT = int(os.environ.get("PORT", 10000))
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Обязательно: https://ваш-домен.onrender.com
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Состояния пользователя (сохраняются между перезапусками)
+# Состояния пользователя
 USER_STATES = {}
-
-# Глобальная переменная для времени старта
 start_time = time.time()
 
 # === ФУНКЦИИ СОХРАНЕНИЯ СОСТОЯНИЙ ===
 def save_states():
-    """Сохранение состояний пользователей в файл"""
     try:
         with open('user_states.json', 'w', encoding='utf-8') as f:
             json.dump(USER_STATES, f)
@@ -45,7 +40,6 @@ def save_states():
         logger.error(f"Ошибка сохранения состояний: {e}")
 
 def load_states():
-    """Загрузка состояний пользователей из файла"""
     global USER_STATES
     if os.path.exists('user_states.json'):
         try:
@@ -56,89 +50,8 @@ def load_states():
             logger.error(f"Ошибка загрузки состояний: {e}")
             USER_STATES = {}
 
-# === УЛУЧШЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ===
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health' or self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            html = """
-            <html>
-            <head>
-                <title>POLINAFIT Bot</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f7fa; }
-                    h1 { color: #4CAF50; }
-                    .status { background: white; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 5px 15px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
-                    .metric { margin: 12px 0; font-size: 18px; }
-                    .metric strong { color: #2196F3; }
-                    .uptime { color: #4CAF50; font-weight: bold; }
-                </style>
-                <meta http-equiv="refresh" content="300">
-            </head>
-            <body>
-                <div class="status">
-                    <h1>🤖 POLINAFIT Bot</h1>
-                    <div class="metric">Status: <strong class="uptime">✅ Online</strong></div>
-                    <div class="metric">Uptime: <strong>{}</strong> seconds</div>
-                    <div class="metric">Last check: <strong>{}</strong></div>
-                    <div class="metric">Users in memory: <strong>{}</strong></div>
-                    <div class="metric">Webhook: <strong>{}</strong></div>
-                </div>
-            </body>
-            </html>
-            """.format(
-                int(time.time() - start_time),
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                len(USER_STATES),
-                "Active" if WEBHOOK_URL else "⚠️ Not configured"
-            )
-            self.wfile.write(html.encode('utf-8'))
-        elif self.path == '/ping':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'pong')
-        elif self.path == '/status':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            status = {
-                "status": "online",
-                "timestamp": datetime.datetime.now().isoformat(),
-                "uptime_seconds": int(time.time() - start_time),
-                "users_in_memory": len(USER_STATES),
-                "bot": "POLINAFIT Fitness Bot",
-                "webhook_configured": bool(WEBHOOK_URL)
-            }
-            self.wfile.write(json.dumps(status).encode('utf-8'))
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass  # Отключаем логирование запросов
-
-def run_health_server():
-    """Запуск веб-сервера для обработки вебхуков и health check"""
-    try:
-        server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
-        logger.info(f"🚀 Веб-сервер запущен на порту {PORT}")
-        logger.info(f"🌐 Health check: http://0.0.0.0:{PORT}/health")
-        logger.info(f"📊 Status JSON: http://0.0.0.0:{PORT}/status")
-        server.serve_forever()
-    except Exception as e:
-        logger.error(f"Ошибка веб-сервера: {e}")
-
-# Запускаем веб-сервер в фоновом потоке
-health_thread = threading.Thread(target=run_health_server, daemon=True)
-health_thread.start()
-
 # === GOOGLE ТАБЛИЦА (ИСПРАВЛЕНО) ===
 def init_google_sheets():
-    """Инициализация подключения к Google Sheets"""
     try:
         google_creds_json = os.getenv("GOOGLE_CREDS_JSON")
         
@@ -185,6 +98,7 @@ def init_google_sheets():
 SHEET = init_google_sheets()
 
 # === ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ===
+# ИСПРАВЛЕНО: Правильное определение параметра (было "user_ dict")
 def save_to_google_sheets(user_data: dict):
     """Сохранение данных пользователя в Google Sheets"""
     if not SHEET:
@@ -214,7 +128,6 @@ def save_to_google_sheets(user_data: dict):
 
 # === КОМАНДЫ МЕНЮ БОТА ===
 async def set_bot_commands(application: Application):
-    """Установка команд меню бота"""
     commands = [
         BotCommand("start", "Начать работу"),
         BotCommand("project", "Описание проекта"),
@@ -226,16 +139,29 @@ async def set_bot_commands(application: Application):
     await application.bot.set_my_commands(commands)
     logger.info("✅ Команды меню установлены")
 
+# === ОБРАБОТЧИК HEALTH CHECK ===
+async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uptime = int(time.time() - start_time)
+    status_text = (
+        f"✅ POLINAFIT Bot ONLINE\n"
+        f"🕐 Uptime: {uptime} секунд\n"
+        f"👥 Активных диалогов: {len(USER_STATES)}\n"
+        f"⏰ Последняя проверка: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    
+    if update.message:
+        await update.message.reply_text(status_text)
+    elif update.callback_query:
+        await update.callback_query.answer("✅ Online", show_alert=False)
+
 # === INLINE КЛАВИАТУРЫ ===
 def get_start_keyboard():
-    """Клавиатура для команды /start"""
     keyboard = [
         [InlineKeyboardButton("Хочу в проект 💪", callback_data='want_project')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_main_menu_keyboard():
-    """Основное меню после описания проекта"""
     keyboard = [
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
         [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')]
@@ -243,7 +169,6 @@ def get_main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_tariffs_keyboard():
-    """Клавиатура с тарифами - БЕЗ КНОПКИ НАЗАД"""
     keyboard = [
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
         [InlineKeyboardButton("1 месяц (3000 ₽)", callback_data='tariff_30')],
@@ -252,21 +177,18 @@ def get_tariffs_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_reviews_keyboard():
-    """Клавиатура после отзывов"""
     keyboard = [
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_continue_keyboard():
-    """Клавиатура после оплаты"""
     keyboard = [
         [InlineKeyboardButton("Продолжить ▶️", callback_data='continue')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_cancel_keyboard():
-    """Клавиатура для отмены ввода email"""
     keyboard = [
         [InlineKeyboardButton("Отмена", callback_data='cancel')]
     ]
@@ -274,7 +196,6 @@ def get_cancel_keyboard():
 
 # === ОСНОВНЫЕ ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
     user = update.effective_user
     logger.info(f"Пользователь {user.id} ({user.username}) начал диалог")
     
@@ -305,7 +226,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /menu - показать главное меню"""
     menu_text = (
         "📋 **Главное меню POLINAFIT**\n\n"
         "Доступные команды:\n"
@@ -323,7 +243,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /project - описание проекта"""
     desc = (
         "Проект POLINAFIT — это комплексная работа, где важно абсолютно всё! Режим питания, тренировки, "
         "поддержка от участниц проекта и лично меня! Это то место, где я помогу тебе дойти до результата, "
@@ -355,14 +274,12 @@ async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(features)
-    
     await update.message.reply_text(
         "Выбери, что хочешь узнать:",
         reply_markup=get_main_menu_keyboard()
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /help"""
     help_text = (
         "🆘 **Помощь и поддержка**\n\n"
         "Если у вас возникли вопросы:\n\n"
@@ -383,7 +300,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def send_project_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка описания проекта"""
     query = update.callback_query
     await query.answer()
     
@@ -432,7 +348,6 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
     )
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка информации о тарифах"""
     query = update.callback_query
     await query.answer()
     
@@ -469,11 +384,10 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка отзывов"""
     query = update.callback_query
     await query.answer()
     
-    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL + добавлен недостающий отзыв
+    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
@@ -486,14 +400,13 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
-    # Отправляем первые 5 отзывов
     for i, url in enumerate(review_photos[:5]):
         try:
             await context.bot.send_photo(
                 chat_id=query.message.chat_id,
                 photo=url
             )
-            await asyncio.sleep(0.5)  # Небольшая задержка для надёжности
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
@@ -506,7 +419,6 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /tariffs"""
     # ИСПРАВЛЕНО: Убраны пробелы в конце URL
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
@@ -538,8 +450,7 @@ async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /reviews"""
-    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL + добавлен недостающий отзыв
+    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
@@ -552,7 +463,6 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
-    # Отправляем первые 5 отзывов
     for i, url in enumerate(review_photos[:5]):
         try:
             await update.message.reply_photo(photo=url)
@@ -567,8 +477,8 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_reviews_keyboard()
     )
 
+# ИСПРАВЛЕНО: Правильное определение параметра (было "tariff_ str")
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
-    """Обработка выбора тарифа"""
     query = update.callback_query
     await query.answer()
     
@@ -581,8 +491,8 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     tariff = tariff_map.get(tariff_data)
     if tariff:
         context.user_data['tariff'] = tariff
-        USER_STATES[str(query.from_user.id)] = "waiting_for_email"  # Сохраняем как строку для совместимости с JSON
-        save_states()  # Сохраняем состояние сразу
+        USER_STATES[str(query.from_user.id)] = "waiting_for_email"
+        save_states()
         
         await context.bot.send_message(
             chat_id=query.message.chat_id,
@@ -592,7 +502,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         )
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка отмены"""
     query = update.callback_query
     await query.answer()
     
@@ -606,14 +515,12 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кнопки продолжить"""
     query = update.callback_query
     await query.answer()
     
     await send_final_instructions(update, context)
 
 async def send_final_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка финальных инструкций"""
     if hasattr(update, 'callback_query'):
         query = update.callback_query
         chat_id = query.message.chat_id
@@ -646,14 +553,11 @@ async def send_final_instructions(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ввода email - УЛУЧШЕНА ВАЛИДАЦИЯ"""
     user_id = update.effective_user.id
     email = update.message.text.strip()
     
     if str(user_id) in USER_STATES and USER_STATES[str(user_id)] == "waiting_for_email":
-        # Расширенная валидация email
         if "@" in email and "." in email and len(email) > 5 and " " not in email:
-            # Успешная валидация
             context.user_data['email'] = email
             context.user_data['user_id'] = user_id
             context.user_data['username'] = update.effective_user.username or ""
@@ -688,7 +592,6 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             save_to_google_sheets(user_data_to_save)
             
         else:
-            # Некорректный email - просим исправить с примером
             await update.message.reply_text(
                 "📧 Некорректный email. Пример правильного формата:\n"
                 "`example@mail.ru` или `name@gmail.com`\n\n"
@@ -698,7 +601,6 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик всех callback запросов"""
     query = update.callback_query
     data = query.data
     
@@ -720,7 +622,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer(f"Неизвестная команда: {data}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений"""
     user_id = update.effective_user.id
     
     if str(user_id) in USER_STATES and USER_STATES[str(user_id)] == "waiting_for_email":
@@ -749,7 +650,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 async def send_project_description_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправка описания проекта из текстового сообщения"""
     desc = (
         "Проект POLINAFIT — это комплексная работа, где важно абсолютно всё! Режим питания, тренировки, "
         "поддержка от участниц проекта и лично меня! Это то место, где я помогу тебе дойти до результата, "
@@ -787,7 +687,6 @@ async def send_project_description_from_message(update: Update, context: Context
     )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
     logger.error(f"Ошибка при обработке обновления: {context.error}", exc_info=True)
     
     try:
@@ -801,7 +700,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === АДМИН КОМАНДЫ ===
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Статистика для администратора"""
     ADMIN_ID = 123456789  # ЗАМЕНИТЕ НА ВАШ РЕАЛЬНЫЙ ID
     
     if update.effective_user.id != ADMIN_ID:
@@ -820,8 +718,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏰ Uptime: {int(time.time() - start_time)} сек (~{int((time.time() - start_time)/60)} мин)\n"
             f"👥 Пользователей в базе: {records}\n"
             f"💬 Активных диалогов: {len(USER_STATES)}\n"
-            f"🌐 Webhook: {'Настроен' if WEBHOOK_URL else '⚠️ Не настроен'}\n"
-            f"🔗 Health check: http://0.0.0.0:{PORT}/health"
+            f"🌐 Webhook: {'Настроен' if WEBHOOK_URL else '⚠️ Не настроен'}"
         )
         
         await update.message.reply_text(stats_text, parse_mode="Markdown")
@@ -832,40 +729,35 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === ОСНОВНАЯ ФУНКЦИЯ ===
 async def post_init(application: Application):
-    """Функция после инициализации бота"""
-    # Загружаем сохранённые состояния
     load_states()
     await set_bot_commands(application)
     logger.info(f"✅ Загружено {len(USER_STATES)} состояний пользователей")
 
 def main():
-    """Основная функция запуска бота"""
-    # Загружаем состояния при старте
     load_states()
     
     logger.info("=" * 60)
     logger.info("🤖 ЗАПУСК POLINAFIT БОТА")
     logger.info(f"Токен: {TOKEN[:10]}...")
     logger.info(f"Порт: {PORT}")
-    logger.info(f"Webhook URL: {WEBHOOK_URL if WEBHOOK_URL else '⚠️ Не настроен (работает в режиме polling)'}")
+    logger.info(f"Webhook URL: {WEBHOOK_URL if WEBHOOK_URL else '⚠️ Не настроен'}")
     logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
     logger.info(f"Загружено состояний: {len(USER_STATES)}")
     logger.info("=" * 60)
     
     try:
-        # Создаём приложение БЕЗ устаревших параметров
         application = Application.builder() \
             .token(TOKEN) \
             .post_init(post_init) \
             .build()
         
-        # Регистрируем обработчики
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("menu", menu_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("project", project_command))
         application.add_handler(CommandHandler("tariffs", tariffs_command))
         application.add_handler(CommandHandler("reviews", reviews_command))
+        application.add_handler(CommandHandler("health", health_check))
         application.add_handler(CommandHandler("stats", admin_stats))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -873,13 +765,10 @@ def main():
         
         logger.info("✅ Бот инициализирован")
         
-        # === КРИТИЧЕСКИ ВАЖНО: ВЫБОР РЕЖИМА РАБОТЫ ===
         if WEBHOOK_URL:
-            # РЕКОМЕНДУЕТСЯ ДЛЯ БЕСПЛАТНОГО ХОСТИНГА
             logger.info(f"🔌 Запуск в режиме WEBHOOK (порт {PORT})")
-            logger.info(f"   URL: {WEBHOOK_URL}/{TOKEN}")
+            logger.info(f"   Webhook URL: {WEBHOOK_URL}/{TOKEN}")
             
-            # Настраиваем вебхук
             application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
@@ -889,10 +778,7 @@ def main():
                 allowed_updates=Update.ALL_TYPES
             )
         else:
-            # Резервный режим (не рекомендуется для 24/7)
-            logger.warning("⚠️ WEBHOOK_URL не настроен! Используется polling (бот будет засыпать на бесплатном хостинге)")
-            logger.warning("   Настройте переменную окружения WEBHOOK_URL для работы 24/7")
-            
+            logger.warning("⚠️ WEBHOOK_URL не настроен! Используется polling (только для разработки)")
             application.run_polling(
                 drop_pending_updates=True,
                 allowed_updates=Update.ALL_TYPES
