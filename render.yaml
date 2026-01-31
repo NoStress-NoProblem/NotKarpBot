@@ -11,12 +11,12 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
+      - key: WEBHOOK_URL
+        sync: false
       - key: GOOGLE_CREDS_JSON
         sync: false
       - key: PORT
         value: 10000
-      - key: PYTHON_VERSION
-        value: 3.12.8
       - key: PYTHONUNBUFFERED
         value: true
     healthCheckPath: /health

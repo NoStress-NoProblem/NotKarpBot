@@ -6,17 +6,21 @@ import asyncio
 import threading
 import json
 import time
+import urllib.request
+import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# === НАСТРОЙКИ ЛОГИРОВАНИЯ (ОПТИМИЗИРОВАНО ДЛЯ БЕСПЛАТНОГО ХОСТИНГА) ===
-# Убрали логирование в файл - бесплатный хостинг имеет ограничения на диск
+# === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[logging.StreamHandler()]  # Только в консоль
+    handlers=[
+        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -27,48 +31,12 @@ if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
 
 PORT = int(os.environ.get("PORT", 10000))
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Должен быть в формате: https://ваш-домен.onrender.com
 
-# Состояния пользователя (будут сохраняться в файл)
+# Состояния пользователя
 USER_STATES = {}
 
 # Глобальная переменная для времени старта
 start_time = time.time()
-
-# === ФУНКЦИИ СОХРАНЕНИЯ СОСТОЯНИЙ ===
-def save_states():
-    """Сохранение состояний пользователей в файл"""
-    try:
-        with open('user_states.json', 'w', encoding='utf-8') as f:
-            json.dump(USER_STATES, f)
-        logger.debug(f"Сохранено {len(USER_STATES)} состояний пользователей")
-    except Exception as e:
-        logger.error(f"Ошибка сохранения состояний: {e}")
-
-def load_states():
-    """Загрузка состояний пользователей из файла"""
-    global USER_STATES
-    if os.path.exists('user_states.json'):
-        try:
-            with open('user_states.json', 'r', encoding='utf-8') as f:
-                USER_STATES = json.load(f)
-            logger.info(f"Загружено {len(USER_STATES)} состояний пользователей")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки состояний: {e}")
-            USER_STATES = {}
-
-# === РЕЙТ-ЛИМИТ ЗАЩИТА ОТ СПАМА ===
-from collections import defaultdict
-
-user_last_request = defaultdict(float)
-
-async def check_rate_limit(user_id: int) -> bool:
-    """Проверка рейт-лимита (1 запрос в секунду)"""
-    now = time.time()
-    if now - user_last_request[user_id] < 1.0:
-        return False
-    user_last_request[user_id] = now
-    return True
 
 # === УЛУЧШЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -83,30 +51,26 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 <title>POLINAFIT Bot</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
-                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }}
-                    h1 {{ color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
-                    .status {{ background: white; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }}
-                    .metric {{ margin: 10px 0; font-size: 16px; }}
-                    .metric strong {{ color: #667eea; }}
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    h1 {{ color: #4CAF50; }}
+                    .status {{ background: #f0f0f0; padding: 20px; border-radius: 10px; display: inline-block; }}
                 </style>
                 <meta http-equiv="refresh" content="300">
             </head>
             <body>
                 <div class="status">
                     <h1>🤖 POLINAFIT Bot</h1>
-                    <div class="metric">Status: <strong style="color: #4CAF50;">✅ Online</strong></div>
-                    <div class="metric">Uptime: <strong>{} seconds</strong></div>
-                    <div class="metric">Last check: <strong>{}</strong></div>
-                    <div class="metric">Users in memory: <strong>{}</strong></div>
-                    <div class="metric">Webhook: <strong>{}</strong></div>
+                    <p>Status: <strong style="color: green;">✅ Online</strong></p>
+                    <p>Uptime: {} seconds</p>
+                    <p>Last check: {}</p>
+                    <p>Users in memory: {}</p>
                 </div>
             </body>
             </html>
             """.format(
                 int(time.time() - start_time),
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                len(USER_STATES),
-                "Active" if WEBHOOK_URL else "Not configured"
+                len(USER_STATES)
             )
             self.wfile.write(html.encode('utf-8'))
         elif self.path == '/ping' or self.path == '/keepalive':
@@ -123,8 +87,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "timestamp": datetime.datetime.now().isoformat(),
                 "uptime_seconds": int(time.time() - start_time),
                 "users_in_memory": len(USER_STATES),
-                "bot": "POLINAFIT Fitness Bot",
-                "webhook_configured": bool(WEBHOOK_URL)
+                "bot": "POLINAFIT Fitness Bot"
             }
             self.wfile.write(json.dumps(status).encode('utf-8'))
         else:
@@ -146,11 +109,36 @@ def run_health_server():
     except Exception as e:
         logger.error(f"Ошибка веб-сервера: {e}")
 
-# Запускаем веб-сервер в фоновом потоке
+# Запускаем веб-сервер в фоновом потоке с высоким приоритетом
 health_thread = threading.Thread(target=run_health_server, daemon=True)
 health_thread.start()
 
-# === GOOGLE ТАБЛИЦА (ИСПРАВЛЕНО) ===
+# === ДОПОЛНИТЕЛЬНЫЙ СЕРВИС ДЛЯ ПОДДЕРЖАНИЯ АКТИВНОСТИ ===
+def keep_alive_service():
+    """Сервис для поддержания активности (пинг самого себя)"""
+    while True:
+        try:
+            # Игнорируем SSL ошибки для простоты
+            ssl_context = ssl._create_unverified_context()
+            
+            # Пингуем сами себя каждые 4 минуты (240 секунд)
+            urllib.request.urlopen(
+                f"http://localhost:{PORT}/ping",
+                timeout=10,
+                context=ssl_context
+            )
+            logger.debug("✅ Keep-alive ping sent")
+        except Exception as e:
+            logger.warning(f"⚠️ Keep-alive ping failed: {e}")
+        
+        # Ждем 4 минуты перед следующим пингом
+        time.sleep(240)
+
+# Запускаем keep-alive сервис в отдельном потоке
+keep_alive_thread = threading.Thread(target=keep_alive_service, daemon=True)
+keep_alive_thread.start()
+
+# === GOOGLE ТАБЛИЦА ===
 def init_google_sheets():
     """Инициализация подключения к Google Sheets"""
     try:
@@ -171,7 +159,6 @@ def init_google_sheets():
         else:
             creds_file = google_creds_json
         
-        # ИСПРАВЛЕНО: Убраны пробелы в конце строк
         SCOPE = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
@@ -233,8 +220,7 @@ async def set_bot_commands(application: Application):
         BotCommand("start", "Начать работу"),
         BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Тарифы"),
-        BotCommand("reviews", "Отзывы"),
-        BotCommand("help", "Помощь")
+        BotCommand("reviews", "Отзывы")
     ]
     
     await application.bot.set_my_commands(commands)
@@ -257,12 +243,12 @@ def get_main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_tariffs_keyboard():
-    """Клавиатура с тарифами"""
+    """Клавиатура с тарифами - БЕЗ КНОПКИ НАЗАД"""
     keyboard = [
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
         [InlineKeyboardButton("1 месяц (3000 ₽)", callback_data='tariff_30')],
-        [InlineKeyboardButton("3 месяца (6990 ₽)", callback_data='tariff_90')],
-        [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main')]
+        [InlineKeyboardButton("3 месяца (6990 ₽)", callback_data='tariff_90')]
+        # Кнопка "назад" удалена
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -290,19 +276,12 @@ def get_cancel_keyboard():
 # === ОСНОВНЫЕ ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
-    # Проверка рейт-лимита
-    user_id = update.effective_user.id
-    if not await check_rate_limit(user_id):
-        await update.message.reply_text("⏳ Подождите немного перед следующим запросом")
-        return
-    
     user = update.effective_user
     logger.info(f"Пользователь {user.id} ({user.username}) начал диалог")
     
     if 'user_data' in context.user_data:
         context.user_data.clear()
     
-    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
@@ -327,10 +306,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /menu - показать главное меню"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
     menu_text = (
         "📋 **Главное меню POLINAFIT**\n\n"
         "Доступные команды (используйте меню слева от поля ввода):\n\n"
@@ -350,10 +325,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /project - описание проекта"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -396,10 +367,6 @@ async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
     help_text = (
         "🆘 **Помощь и поддержка**\n\n"
         "Если у вас возникли вопросы или проблемы:\n\n"
@@ -422,12 +389,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_project_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка описания проекта - БЕЗ УДАЛЕНИЯ ПЕРВОГО СООБЩЕНИЯ"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
@@ -480,16 +441,9 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка информации о тарифах"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
-    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
@@ -524,16 +478,9 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка отзывов"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
-    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
@@ -571,11 +518,6 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /tariffs"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
-    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
@@ -608,11 +550,6 @@ async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /reviews"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
-    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
@@ -645,12 +582,6 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     """Обработка выбора тарифа"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
@@ -664,7 +595,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     if tariff:
         context.user_data['tariff'] = tariff
         USER_STATES[query.from_user.id] = "waiting_for_email"
-        save_states()  # Сразу сохраняем состояние
         
         await context.bot.send_message(
             chat_id=query.message.chat_id,
@@ -673,36 +603,12 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
             reply_markup=get_cancel_keyboard()
         )
 
-async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кнопки назад"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
-    query = update.callback_query
-    await query.answer()
-    
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Выбери, что хочешь узнать:",
-        reply_markup=get_main_menu_keyboard()
-    )
-
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка отмены"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
     USER_STATES.pop(query.from_user.id, None)
-    save_states()  # Сохраняем изменения
     
     await context.bot.send_message(
         chat_id=query.message.chat_id,
@@ -712,12 +618,6 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка кнопки продолжить"""
-    # Проверка рейт-лимита
-    user_id = update.callback_query.from_user.id
-    if not await check_rate_limit(user_id):
-        await update.callback_query.answer("⏳ Подождите немного")
-        return
-    
     query = update.callback_query
     await query.answer()
     
@@ -756,24 +656,19 @@ async def send_final_instructions(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ввода email"""
+    """Обработка ввода email - УЛУЧШЕНА ОБРАБОТКА ОШИБОК"""
     user_id = update.effective_user.id
-    
-    # Проверка рейт-лимита
-    if not await check_rate_limit(user_id):
-        await update.message.reply_text("⏳ Подождите немного перед следующим сообщением")
-        return
-    
     email = update.message.text
     
     if user_id in USER_STATES and USER_STATES[user_id] == "waiting_for_email":
-        if "@" in email and "." in email:
+        # Проверяем корректность email
+        if "@" in email and "." in email and len(email) > 5:
+            # Успешная валидация
             context.user_data['email'] = email
             context.user_data['user_id'] = user_id
             context.user_data['username'] = update.effective_user.username or ""
             
             USER_STATES.pop(user_id, None)
-            save_states()  # Сохраняем изменения
             
             tariff = context.user_data.get('tariff', '')
             duration = "15 дней" if "15" in tariff else ("1 месяц" if "1" in tariff else "3 месяца")
@@ -802,9 +697,10 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             save_to_google_sheets(user_data_to_save)
             
         else:
+            # Некорректный email - просим исправить
             await update.message.reply_text(
-                "Пожалуйста, введите корректный email (например: polina@mail.ru)\n"
-                "Или нажмите кнопку 'Отмена':",
+                "📧 Пожалуйста, введите корректный email (например: polina@mail.ru)\n\n"
+                "Попробуйте ещё раз:",
                 reply_markup=get_cancel_keyboard()
             )
 
@@ -820,9 +716,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
-        'back_to_main': handle_back,
         'cancel': handle_cancel,
         'continue': handle_continue
+        # Обработчик 'back_to_main' удалён
     }
     
     handler = handlers.get(data)
@@ -834,10 +730,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     user_id = update.effective_user.id
-    
-    # Проверка рейт-лимита
-    if not await check_rate_limit(user_id):
-        return
     
     if user_id in USER_STATES and USER_STATES[user_id] == "waiting_for_email":
         await handle_email_input(update, context)
@@ -869,10 +761,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_project_description_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка описания проекта из текстового сообщения"""
-    # Проверка рейт-лимита
-    if not await check_rate_limit(update.effective_user.id):
-        return
-    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -952,8 +840,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👥 Всего пользователей в базе: {records}\n"
             f"🤖 Состояний пользователей в памяти: {len(USER_STATES)}\n"
             f"🕒 Текущее время: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🌐 Health check: http://0.0.0.0:{PORT}/health\n"
-            f"🔌 Webhook: {'Настроен' if WEBHOOK_URL else 'Не настроен'}"
+            f"🌐 Health check: http://0.0.0.0:{PORT}/health"
         )
         
         await update.message.reply_text(stats_text, parse_mode="Markdown")
@@ -966,23 +853,11 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(application: Application):
     """Функция, которая выполняется после инициализации бота"""
     await set_bot_commands(application)
-    
-    # Загружаем сохранённые состояния при старте
-    load_states()
-    
-    logger.info(f"✅ Загружено {len(USER_STATES)} состояний пользователей")
 
 def main():
     """Основная функция запуска бота с улучшенной стабильностью"""
     max_retries = 5
     retry_delay = 30  # секунд
-    
-    # Загружаем состояния при старте
-    load_states()
-    
-    # Проверяем, проснулся ли бот после сна
-    if time.time() - start_time < 300:  # Первые 5 минут после старта
-        logger.info("💤 Бот проснулся после сна. Состояния восстановлены.")
     
     for attempt in range(max_retries):
         try:
@@ -990,10 +865,8 @@ def main():
             logger.info(f"🤖 ПОПЫТКА ЗАПУСКА БОТА #{attempt + 1}")
             logger.info(f"Токен: {TOKEN[:10]}...")
             logger.info(f"Порт: {PORT}")
-            logger.info(f"Webhook URL: {WEBHOOK_URL if WEBHOOK_URL else 'Не настроен (используется polling)'}")
             logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
             logger.info(f"Время старта: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"Загружено состояний: {len(USER_STATES)}")
             logger.info("=" * 60)
             
             # Создаем Application с улучшенными настройками
@@ -1026,42 +899,19 @@ def main():
             application.add_error_handler(error_handler)
             
             logger.info("✅ Бот успешно запущен и готов к работе!")
-            logger.info("🔧 Конфигурация оптимизирована для бесплатного хостинга")
-            logger.info("📈 Используйте UptimeRobot для внешнего пинга каждые 5 минут")
             
-            # === ВЫБОР РЕЖИМА РАБОТЫ: WEBHOOK ИЛИ POLLING ===
-            if WEBHOOK_URL:
-                # РЕКОМЕНДУЕТСЯ для бесплатного хостинга: Используем Webhooks
-                logger.info("🔌 Запуск в режиме WEBHOOK (рекомендуется для бесплатного хостинга)")
-                logger.info(f"   Webhook URL: {WEBHOOK_URL}/{TOKEN}")
-                
-                application.run_webhook(
-                    listen="0.0.0.0",
-                    port=PORT,
-                    url_path=TOKEN,
-                    webhook_url=f"{WEBHOOK_URL}/{TOKEN}",
-                    drop_pending_updates=True,
-                    allowed_updates=Update.ALL_TYPES,
-                    close_loop=False,
-                    stop_signals=[]
-                )
-            else:
-                # Резервный режим: Polling (не рекомендуется для бесплатного хостинга)
-                logger.warning("⚠️ Webhook URL не настроен! Используется POLLING (не рекомендуется для бесплатного хостинга)")
-                logger.warning("   Настройте переменную окружения WEBHOOK_URL для стабильной работы 24/7")
-                
-                application.run_polling(
-                    drop_pending_updates=True,
-                    allowed_updates=Update.ALL_TYPES,
-                    close_loop=False,
-                    stop_signals=[],
-                    pool_timeout=120,
-                    connect_timeout=120,
-                    read_timeout=120,
-                    write_timeout=120
-                )
+            # Запускаем бота с улучшенными параметрами
+            application.run_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                close_loop=False,
+                stop_signals=[],
+                pool_timeout=120,
+                connect_timeout=120,
+                read_timeout=120,
+                write_timeout=120
+            )
             
-            # Если бот завершился "нормально", выходим
             break
             
         except Exception as e:
