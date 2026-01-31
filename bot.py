@@ -6,21 +6,17 @@ import asyncio
 import threading
 import json
 import time
-import urllib.request
-import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
+# === НАСТРОЙКИ ЛОГИРОВАНИЯ (ОПТИМИЗИРОВАНО ДЛЯ БЕСПЛАТНОГО ХОСТИНГА) ===
+# Убрали логирование в файл - бесплатный хостинг имеет ограничения на диск
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]  # Только в консоль
 )
 logger = logging.getLogger(__name__)
 
@@ -31,12 +27,48 @@ if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
 
 PORT = int(os.environ.get("PORT", 10000))
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Должен быть в формате: https://ваш-домен.onrender.com
 
-# Состояния пользователя
+# Состояния пользователя (будут сохраняться в файл)
 USER_STATES = {}
 
 # Глобальная переменная для времени старта
 start_time = time.time()
+
+# === ФУНКЦИИ СОХРАНЕНИЯ СОСТОЯНИЙ ===
+def save_states():
+    """Сохранение состояний пользователей в файл"""
+    try:
+        with open('user_states.json', 'w', encoding='utf-8') as f:
+            json.dump(USER_STATES, f)
+        logger.debug(f"Сохранено {len(USER_STATES)} состояний пользователей")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения состояний: {e}")
+
+def load_states():
+    """Загрузка состояний пользователей из файла"""
+    global USER_STATES
+    if os.path.exists('user_states.json'):
+        try:
+            with open('user_states.json', 'r', encoding='utf-8') as f:
+                USER_STATES = json.load(f)
+            logger.info(f"Загружено {len(USER_STATES)} состояний пользователей")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки состояний: {e}")
+            USER_STATES = {}
+
+# === РЕЙТ-ЛИМИТ ЗАЩИТА ОТ СПАМА ===
+from collections import defaultdict
+
+user_last_request = defaultdict(float)
+
+async def check_rate_limit(user_id: int) -> bool:
+    """Проверка рейт-лимита (1 запрос в секунду)"""
+    now = time.time()
+    if now - user_last_request[user_id] < 1.0:
+        return False
+    user_last_request[user_id] = now
+    return True
 
 # === УЛУЧШЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -51,26 +83,30 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 <title>POLINAFIT Bot</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
-                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
-                    h1 {{ color: #4CAF50; }}
-                    .status {{ background: #f0f0f0; padding: 20px; border-radius: 10px; display: inline-block; }}
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }}
+                    h1 {{ color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
+                    .status {{ background: white; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }}
+                    .metric {{ margin: 10px 0; font-size: 16px; }}
+                    .metric strong {{ color: #667eea; }}
                 </style>
                 <meta http-equiv="refresh" content="300">
             </head>
             <body>
                 <div class="status">
                     <h1>🤖 POLINAFIT Bot</h1>
-                    <p>Status: <strong style="color: green;">✅ Online</strong></p>
-                    <p>Uptime: {} seconds</p>
-                    <p>Last check: {}</p>
-                    <p>Users in memory: {}</p>
+                    <div class="metric">Status: <strong style="color: #4CAF50;">✅ Online</strong></div>
+                    <div class="metric">Uptime: <strong>{} seconds</strong></div>
+                    <div class="metric">Last check: <strong>{}</strong></div>
+                    <div class="metric">Users in memory: <strong>{}</strong></div>
+                    <div class="metric">Webhook: <strong>{}</strong></div>
                 </div>
             </body>
             </html>
             """.format(
                 int(time.time() - start_time),
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                len(USER_STATES)
+                len(USER_STATES),
+                "Active" if WEBHOOK_URL else "Not configured"
             )
             self.wfile.write(html.encode('utf-8'))
         elif self.path == '/ping' or self.path == '/keepalive':
@@ -87,7 +123,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "timestamp": datetime.datetime.now().isoformat(),
                 "uptime_seconds": int(time.time() - start_time),
                 "users_in_memory": len(USER_STATES),
-                "bot": "POLINAFIT Fitness Bot"
+                "bot": "POLINAFIT Fitness Bot",
+                "webhook_configured": bool(WEBHOOK_URL)
             }
             self.wfile.write(json.dumps(status).encode('utf-8'))
         else:
@@ -109,36 +146,11 @@ def run_health_server():
     except Exception as e:
         logger.error(f"Ошибка веб-сервера: {e}")
 
-# Запускаем веб-сервер в фоновом потоке с высоким приоритетом
+# Запускаем веб-сервер в фоновом потоке
 health_thread = threading.Thread(target=run_health_server, daemon=True)
 health_thread.start()
 
-# === ДОПОЛНИТЕЛЬНЫЙ СЕРВИС ДЛЯ ПОДДЕРЖАНИЯ АКТИВНОСТИ ===
-def keep_alive_service():
-    """Сервис для поддержания активности (пинг самого себя)"""
-    while True:
-        try:
-            # Игнорируем SSL ошибки для простоты
-            ssl_context = ssl._create_unverified_context()
-            
-            # Пингуем сами себя каждые 4 минуты (240 секунд)
-            urllib.request.urlopen(
-                f"http://localhost:{PORT}/ping",
-                timeout=10,
-                context=ssl_context
-            )
-            logger.debug("✅ Keep-alive ping sent")
-        except Exception as e:
-            logger.warning(f"⚠️ Keep-alive ping failed: {e}")
-        
-        # Ждем 4 минуты перед следующим пингом
-        time.sleep(240)
-
-# Запускаем keep-alive сервис в отдельном потоке
-keep_alive_thread = threading.Thread(target=keep_alive_service, daemon=True)
-keep_alive_thread.start()
-
-# === GOOGLE ТАБЛИЦА ===
+# === GOOGLE ТАБЛИЦА (ИСПРАВЛЕНО) ===
 def init_google_sheets():
     """Инициализация подключения к Google Sheets"""
     try:
@@ -159,6 +171,7 @@ def init_google_sheets():
         else:
             creds_file = google_creds_json
         
+        # ИСПРАВЛЕНО: Убраны пробелы в конце строк
         SCOPE = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
@@ -220,7 +233,8 @@ async def set_bot_commands(application: Application):
         BotCommand("start", "Начать работу"),
         BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Тарифы"),
-        BotCommand("reviews", "Отзывы")
+        BotCommand("reviews", "Отзывы"),
+        BotCommand("help", "Помощь")
     ]
     
     await application.bot.set_my_commands(commands)
@@ -276,13 +290,20 @@ def get_cancel_keyboard():
 # === ОСНОВНЫЕ ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    # Проверка рейт-лимита
+    user_id = update.effective_user.id
+    if not await check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Подождите немного перед следующим запросом")
+        return
+    
     user = update.effective_user
     logger.info(f"Пользователь {user.id} ({user.username}) начал диалог")
     
     if 'user_data' in context.user_data:
         context.user_data.clear()
     
-    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg  "
+    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
+    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
@@ -306,6 +327,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /menu - показать главное меню"""
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
     menu_text = (
         "📋 **Главное меню POLINAFIT**\n\n"
         "Доступные команды (используйте меню слева от поля ввода):\n\n"
@@ -325,6 +350,10 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /project - описание проекта"""
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -367,12 +396,16 @@ async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
     help_text = (
         "🆘 **Помощь и поддержка**\n\n"
         "Если у вас возникли вопросы или проблемы:\n\n"
         "📞 **Связь с менеджером:** @your_trainer\n"
-        "💬 **Общий чат:** https://t.me/plans_channel  \n"
-        "📚 **Закрытая группа:** https://t.me/recipes_group  \n\n"
+        "💬 **Общий чат:** @plans_channel\n"
+        "📚 **Закрытая группа:** @recipes_group\n\n"
         "**Команды бота:**\n"
         "/start - Начать диалог\n"
         "/menu - Показать меню\n"
@@ -389,11 +422,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_project_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка описания проекта - БЕЗ УДАЛЕНИЯ ПЕРВОГО СООБЩЕНИЯ"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
-    
-    # НЕ удаляем первое сообщение с фото и кнопкой!
-    # Просто отправляем новое сообщение с описанием
     
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
@@ -402,7 +438,6 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
         "если случились непредвиденные обстоятельства (отпуск,стресс,травмы,болезнь итд)"
     )
     
-    # Отправляем описание как новое сообщение
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=desc
@@ -432,13 +467,11 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
         "Ведь так важно знать,что ты не один и тебя всегда поддержат!🫂"
     )
     
-    # Отправляем особенности как новое сообщение
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=features
     )
     
-    # Отправляем кнопки выбора
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Выбери, что хочешь узнать:",
@@ -447,11 +480,17 @@ async def send_project_description(update: Update, context: ContextTypes.DEFAULT
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка информации о тарифах"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
-    # Отправляем новое сообщение с фото тарифов
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg  "
+    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -485,19 +524,26 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка отзывов"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
+    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg  ",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg  ",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg  ",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg  ",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg  ",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg  ",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg  ",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg  ",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg  "
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
     # Отправляем первые 5 отзывов
@@ -512,7 +558,6 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
 
-    # Отправляем текст и кнопку после отзывов
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!"
@@ -526,7 +571,12 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /tariffs"""
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg  "
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
+    # ИСПРАВЛЕНО: Убраны пробелы в конце URL
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -558,16 +608,21 @@ async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /reviews"""
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
+    # ИСПРАВЛЕНО: Убраны пробелы в конце всех URL
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg  ",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg  ",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg  ",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg  ",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg  ",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg  ",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg  ",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg  ",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg  "
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
     # Отправляем первые 5 отзывов
@@ -590,6 +645,12 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     """Обработка выбора тарифа"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
@@ -603,8 +664,8 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     if tariff:
         context.user_data['tariff'] = tariff
         USER_STATES[query.from_user.id] = "waiting_for_email"
+        save_states()  # Сразу сохраняем состояние
         
-        # Отправляем новое сообщение с запросом email
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=f"Вы выбрали: {tariff}\n\n"
@@ -614,10 +675,15 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
 
 async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка кнопки назад"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
-    # Отправляем новое сообщение с главным меню
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Выбери, что хочешь узнать:",
@@ -626,12 +692,18 @@ async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка отмены"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
     USER_STATES.pop(query.from_user.id, None)
+    save_states()  # Сохраняем изменения
     
-    # Отправляем новое сообщение с главным меню
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Действие отменено. Что хочешь сделать?",
@@ -640,6 +712,12 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка кнопки продолжить"""
+    # Проверка рейт-лимита
+    user_id = update.callback_query.from_user.id
+    if not await check_rate_limit(user_id):
+        await update.callback_query.answer("⏳ Подождите немного")
+        return
+    
     query = update.callback_query
     await query.answer()
     
@@ -674,12 +752,18 @@ async def send_final_instructions(update: Update, context: ContextTypes.DEFAULT_
     
     await context.bot.send_message(
         chat_id=chat_id,
-        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 https://t.me/recipes_group  "
+        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 @recipes_group"
     )
 
 async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ввода email"""
     user_id = update.effective_user.id
+    
+    # Проверка рейт-лимита
+    if not await check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Подождите немного перед следующим сообщением")
+        return
+    
     email = update.message.text
     
     if user_id in USER_STATES and USER_STATES[user_id] == "waiting_for_email":
@@ -689,6 +773,7 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data['username'] = update.effective_user.username or ""
             
             USER_STATES.pop(user_id, None)
+            save_states()  # Сохраняем изменения
             
             tariff = context.user_data.get('tariff', '')
             duration = "15 дней" if "15" in tariff else ("1 месяц" if "1" in tariff else "3 месяца")
@@ -696,7 +781,7 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             payment_msg = (
                 f"Поздравляю! Подписка успешно оформлена на **{duration}** 🥳\n\n"
                 "Ура! Ты в проекте! Прежде чем начать, давай ообсудим пару организационных моментов⤵️\n\n"
-                "1️⃣ Вступи в чат ,где мы общаемся: https://t.me/plans_channel    \n"
+                "1️⃣ Вступи в чат ,где мы общаемся: @plans_channel\n"
                 "2️⃣ Активируй чат с Полиной: @your_trainer\n\n"
                 "После этого нажми кнопку ниже:"
             )
@@ -750,6 +835,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     user_id = update.effective_user.id
     
+    # Проверка рейт-лимита
+    if not await check_rate_limit(user_id):
+        return
+    
     if user_id in USER_STATES and USER_STATES[user_id] == "waiting_for_email":
         await handle_email_input(update, context)
     else:
@@ -780,6 +869,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_project_description_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправка описания проекта из текстового сообщения"""
+    # Проверка рейт-лимита
+    if not await check_rate_limit(update.effective_user.id):
+        return
+    
     desc = (
         "Проект POLINAFIT- это комплексная работа,где важно абсолютно всё! Режим питания,тренировки,"
         "поддержка от участниц проекта и лично меня! Это то, место где я помогу тебе дойти до результата, "
@@ -814,7 +907,10 @@ async def send_project_description_from_message(update: Update, context: Context
     )
     
     await update.message.reply_text(features)
-    reply_markup=get_main_menu_keyboard()
+    await update.message.reply_text(
+        "Выбери, что хочешь узнать:",
+        reply_markup=get_main_menu_keyboard()
+    )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
@@ -837,7 +933,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === АДМИН КОМАНДЫ ===
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статистика для администратора"""
-    ADMIN_ID = 123456789  # Замените на ваш ID Telegram
+    ADMIN_ID = 123456789  # Замените на ваш реальный ID Telegram
     
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Эта команда только для администратора.")
@@ -851,11 +947,13 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         stats_text = (
             "📊 **Статистика бота:**\n\n"
-            f"✅ Бот работает\n"
+            f"✅ Бот работает с: {datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🕐 Uptime: {int(time.time() - start_time)} секунд (~{int((time.time() - start_time)/60)} мин)\n"
             f"👥 Всего пользователей в базе: {records}\n"
             f"🤖 Состояний пользователей в памяти: {len(USER_STATES)}\n"
-            f"🕒 Время сервера: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🌐 Health check: http://0.0.0.0:{PORT}/health"
+            f"🕒 Текущее время: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🌐 Health check: http://0.0.0.0:{PORT}/health\n"
+            f"🔌 Webhook: {'Настроен' if WEBHOOK_URL else 'Не настроен'}"
         )
         
         await update.message.reply_text(stats_text, parse_mode="Markdown")
@@ -869,17 +967,22 @@ async def post_init(application: Application):
     """Функция, которая выполняется после инициализации бота"""
     await set_bot_commands(application)
     
-    # Отправляем сообщение о запуске (опционально)
-    try:
-        # Можно отправить сообщение админу о запуске бота
-        pass
-    except:
-        pass
+    # Загружаем сохранённые состояния при старте
+    load_states()
+    
+    logger.info(f"✅ Загружено {len(USER_STATES)} состояний пользователей")
 
 def main():
     """Основная функция запуска бота с улучшенной стабильностью"""
     max_retries = 5
     retry_delay = 30  # секунд
+    
+    # Загружаем состояния при старте
+    load_states()
+    
+    # Проверяем, проснулся ли бот после сна
+    if time.time() - start_time < 300:  # Первые 5 минут после старта
+        logger.info("💤 Бот проснулся после сна. Состояния восстановлены.")
     
     for attempt in range(max_retries):
         try:
@@ -887,8 +990,10 @@ def main():
             logger.info(f"🤖 ПОПЫТКА ЗАПУСКА БОТА #{attempt + 1}")
             logger.info(f"Токен: {TOKEN[:10]}...")
             logger.info(f"Порт: {PORT}")
+            logger.info(f"Webhook URL: {WEBHOOK_URL if WEBHOOK_URL else 'Не настроен (используется polling)'}")
             logger.info(f"Google Sheets: {'Подключен' if SHEET else 'Не подключен'}")
             logger.info(f"Время старта: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Загружено состояний: {len(USER_STATES)}")
             logger.info("=" * 60)
             
             # Создаем Application с улучшенными настройками
@@ -921,20 +1026,40 @@ def main():
             application.add_error_handler(error_handler)
             
             logger.info("✅ Бот успешно запущен и готов к работе!")
-            logger.info("🔧 Конфигурация оптимизирована для Render Free Tier")
-            logger.info("📈 Используйте uptime-мониторинг для лучшей доступности")
+            logger.info("🔧 Конфигурация оптимизирована для бесплатного хостинга")
+            logger.info("📈 Используйте UptimeRobot для внешнего пинга каждые 5 минут")
             
-            # Запускаем бота с улучшенными параметрами
-            application.run_polling(
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                close_loop=False,
-                stop_signals=[],  # Игнорируем сигналы остановки
-                pool_timeout=120,
-                connect_timeout=120,
-                read_timeout=120,
-                write_timeout=120
-            )
+            # === ВЫБОР РЕЖИМА РАБОТЫ: WEBHOOK ИЛИ POLLING ===
+            if WEBHOOK_URL:
+                # РЕКОМЕНДУЕТСЯ для бесплатного хостинга: Используем Webhooks
+                logger.info("🔌 Запуск в режиме WEBHOOK (рекомендуется для бесплатного хостинга)")
+                logger.info(f"   Webhook URL: {WEBHOOK_URL}/{TOKEN}")
+                
+                application.run_webhook(
+                    listen="0.0.0.0",
+                    port=PORT,
+                    url_path=TOKEN,
+                    webhook_url=f"{WEBHOOK_URL}/{TOKEN}",
+                    drop_pending_updates=True,
+                    allowed_updates=Update.ALL_TYPES,
+                    close_loop=False,
+                    stop_signals=[]
+                )
+            else:
+                # Резервный режим: Polling (не рекомендуется для бесплатного хостинга)
+                logger.warning("⚠️ Webhook URL не настроен! Используется POLLING (не рекомендуется для бесплатного хостинга)")
+                logger.warning("   Настройте переменную окружения WEBHOOK_URL для стабильной работы 24/7")
+                
+                application.run_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=Update.ALL_TYPES,
+                    close_loop=False,
+                    stop_signals=[],
+                    pool_timeout=120,
+                    connect_timeout=120,
+                    read_timeout=120,
+                    write_timeout=120
+                )
             
             # Если бот завершился "нормально", выходим
             break
