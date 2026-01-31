@@ -814,11 +814,7 @@ async def send_project_description_from_message(update: Update, context: Context
     )
     
     await update.message.reply_text(features)
-    
-    await update.message.reply_text(
-        "Выбери, что хочешь узнать:",
-        reply_markup=get_main_menu_keyboard()
-    )
+    reply_markup=get_main_menu_keyboard()
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
