@@ -21,5 +21,7 @@ services:
         value: 3.12.8
       - key: PYTHONUNBUFFERED
         value: true
+      - key: ADMIN_ID
+        sync: false
     healthCheckPath: /health
     autoDeploy: true
