@@ -35,12 +35,12 @@ if not TOKEN:
     raise ValueError("Переменная BOT_TOKEN не задана!")
 
 if ADMIN_ID == 0:
-    logger.warning("ADMIN_ID не настроен!")
+    logger.warning("ADMIN_ID не настроен! Админ-команды будут недоступны.")
 
 PORT = int(os.environ.get("PORT", "10000"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# === PAYKEEPER ===
+# === PAYKEEPER НАСТРОЙКИ ===
 PAYKEEPER_SERVER = os.getenv("PAYKEEPER_SERVER", "")
 PAYKEEPER_USER = os.getenv("PAYKEEPER_USER", "")
 PAYKEEPER_PASSWORD = os.getenv("PAYKEEPER_PASSWORD", "")
@@ -52,7 +52,7 @@ executor = ThreadPoolExecutor(max_workers=4)
 USER_STATES = {}
 start_time = time.time()
 
-# === ОЧЕРЕДЬ СООБЩЕНИЙ ===
+# === ОЧЕРЕДЬ СООБЩЕНИЙ С ЗАДЕРЖКОЙ 0.5 СЕК ===
 class MessageQueue:
     def __init__(self):
         self._queues = defaultdict(queue.Queue)
@@ -88,7 +88,12 @@ class MessageQueue:
             except queue.Empty:
                 break
             except Exception as e:
-                logger.error(f"Ошибка: {e}")
+                logger.error(f"Ошибка обработки сообщения для {user_id}: {e}")
+                try:
+                    if update and update.effective_message:
+                        await update.effective_message.reply_text("⚠️ Произошла ошибка при обработке.")
+                except:
+                    pass
 
 message_queue = MessageQueue()
 
@@ -98,8 +103,9 @@ def save_states():
         data = {'user_states': USER_STATES, 'payments': PAYMENTS, 'paid_users': PAID_USERS}
         with open('user_states.json', 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.debug(f"Сохранено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
     except Exception as e:
-        logger.error(f"Ошибка сохранения: {e}")
+        logger.error(f"Ошибка сохранения состояний: {e}")
 
 def load_states():
     global USER_STATES, PAYMENTS, PAID_USERS
@@ -110,8 +116,10 @@ def load_states():
             USER_STATES = data.get('user_states', {})
             PAYMENTS = data.get('payments', {})
             PAID_USERS = data.get('paid_users', {})
+            logger.info(f"Загружено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
         except Exception as e:
-            logger.error(f"Ошибка загрузки: {e}")
+            logger.error(f"Ошибка загрузки состояний: {e}")
+            USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
     else:
         USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
 
@@ -126,6 +134,7 @@ def init_google_sheets():
                 with open("credentials.json", "r", encoding="utf-8") as f:
                     google_creds_json = f.read()
             except FileNotFoundError:
+                logger.warning("Файл credentials.json не найден, Google Sheets отключен")
                 return None
 
         if google_creds_json.strip().startswith('{'):
@@ -137,8 +146,10 @@ def init_google_sheets():
                 try:
                     if os.path.exists(creds_file):
                         os.unlink(creds_file)
-                except:
-                    pass
+                        logger.debug(f"Временный файл {creds_file} удален")
+                except Exception as e:
+                    logger.error(f"Ошибка удаления временного файла: {e}")
+
             atexit.register(cleanup)
         else:
             creds_file = google_creds_json
@@ -154,12 +165,17 @@ def init_google_sheets():
         SHEET = CLIENT.open("Клиенты фитнес-бота").sheet1
 
         headers = SHEET.row_values(1)
-        if not headers:
-            SHEET.append_row(["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Статус", "ID платежа"])
+        expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Статус оплаты", "ID платежа"]
 
+        if not headers:
+            SHEET.append_row(expected_headers)
+            logger.info("Созданы заголовки в таблице")
+
+        logger.info("✅ Успешно подключено к Google Таблице!")
         return SHEET
+
     except Exception as e:
-        logger.error(f"Ошибка Google Sheets: {e}")
+        logger.error(f"❌ Ошибка подключения к Google Таблице: {e}")
         return None
 
 SHEET = init_google_sheets()
@@ -188,14 +204,14 @@ class PayKeeperAPI:
                     data = await response.json()
                     return data.get('token')
         except Exception as e:
-            logger.error(f"Ошибка токена: {e}")
+            logger.error(f"Ошибка получения токена PayKeeper: {e}")
             return None
 
     async def create_invoice(self, order_id: str, amount: float, client_email: str, client_id: str = "", service_name: str = ""):
         try:
             token = await self.get_token()
             if not token:
-                return {'error': 'Нет токена'}
+                return {'error': 'Не удалось получить токен'}
 
             import aiohttp
             payment_data = {
@@ -214,7 +230,9 @@ class PayKeeperAPI:
                     if 'invoice_id' in result:
                         result['payment_link'] = f'{self.base_url}/bill/{result["invoice_id"]}/'
                     return result
+
         except Exception as e:
+            logger.error(f"Ошибка создания счета PayKeeper: {e}")
             return {'error': str(e)}
 
     async def check_payment_status(self, invoice_id: str):
@@ -225,14 +243,17 @@ class PayKeeperAPI:
                 async with session.get(url, headers=self.get_auth_headers()) as response:
                     return await response.json()
         except Exception as e:
+            logger.error(f"Ошибка проверки статуса: {e}")
             return {'error': str(e)}
 
 paykeeper = None
 if PAYKEEPER_SERVER and PAYKEEPER_USER and PAYKEEPER_PASSWORD:
     paykeeper = PayKeeperAPI(PAYKEEPER_SERVER, PAYKEEPER_USER, PAYKEEPER_PASSWORD)
-    logger.info("✅ PayKeeper инициализирован")
+    logger.info("✅ PayKeeper API инициализирован")
+else:
+    logger.warning("⚠️ PayKeeper не настроен")
 
-# === ВАЛИДАЦИЯ ===
+# === ВАЛИДАЦИЯ EMAIL ===
 def is_valid_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
@@ -257,9 +278,12 @@ def get_tariffs_keyboard():
 def get_payment_keyboard(payment_url: str):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
-        [InlineKeyboardButton("🔄 Проверить", callback_data='check_payment')],
+        [InlineKeyboardButton("🔄 Проверить оплату", callback_data='check_payment')],
         [InlineKeyboardButton("❌ Отмена", callback_data='cancel')]
     ])
+
+def get_reviews_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')]])
 
 def get_continue_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Продолжить ▶️", callback_data='continue')]])
@@ -270,87 +294,222 @@ def get_cancel_keyboard():
 # === ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    logger.info(f"Пользователь {user.id} ({user.username}) начал диалог")
+
     context.user_data.clear()
 
     if str(user.id) in PAID_USERS:
         paid_info = PAID_USERS[str(user.id)]
         await update.message.reply_text(
-            f"👋 С возвращением! Подписка: {paid_info.get('tariff')}\n"
-            f"До: {paid_info.get('paid_until', 'неизвестно')}",
+            f"👋 С возвращением! У вас активная подписка: {paid_info.get('tariff')}\n"
+            f"Действует до: {paid_info.get('paid_until', 'неизвестно')}\n\n"
+            f"Используйте /project для продолжения работы",
             reply_markup=get_main_menu_keyboard()
         )
         return
 
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
-    caption = "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫"
+    caption = (
+        "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
+        "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
+        "Я даю рекомендации по питанию, после того как подробно изучу каждый индивидуальный случай, "
+        "исходя из вашей ситуации, образа жизни, активности, вида деятельности, возможные травмы. "
+        "Именно такой подход поможет тебе достичь поставленной цели!"
+    )
 
     try:
         await update.message.reply_photo(photo=photo_url, caption=caption, reply_markup=get_start_keyboard())
-    except:
+    except Exception as e:
+        logger.error(f"Ошибка отправки фото: {e}")
         await update.message.reply_text(caption, reply_markup=get_start_keyboard())
 
 async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    desc = "Проект POLINAFIT — комплексная работа над собой! 💪\n\n🤍 Индивидуальный расчет КБЖУ\n🤍 Тренировки\n🤍 Поддержка"
-    await update.message.reply_text(desc, reply_markup=get_main_menu_keyboard())
+    desc = (
+        "Проект POLINAFIT — это комплексная работа, где важно абсолютно всё! Режим питания, тренировки, "
+        "поддержка от участниц проекта и лично меня! Это то место, где я помогу тебе дойти до результата, "
+        "доведу тебя за ручку до твоей цели, и ты не откатишься назад даже при непредвиденных обстоятельствах "
+        "(отпуск, стресс, травмы, болезнь и т.д.)"
+    )
 
-async def send_project_info(context, chat_id):
-    desc = "Проект POLINAFIT — комплексная работа над собой! 💪\n\n🤍 Индивидуальный расчет КБЖУ\n🤍 Тренировки\n🤍 Поддержка"
-    await context.bot.send_message(chat_id=chat_id, text=desc, reply_markup=get_main_menu_keyboard())
+    await update.message.reply_text(desc)
 
-async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
-    caption = "Выберите тариф:"
-    try:
-        await update.message.reply_photo(photo=photo_url, caption=caption, reply_markup=get_tariffs_keyboard())
-    except:
-        await update.message.reply_text(caption, reply_markup=get_tariffs_keyboard())
+    features = (
+        "Что входит в проект:\n\n"
+        "🤍 Тренировки для любого уровня подготовки дома или в зале:\n"
+        "— лёгкие, для тех кто только начинает\n"
+        "— средней сложности, для тех кто уже занимается\n"
+        "— интенсивные, для тех кто тренируется регулярно и хочет прогрессировать\n\n"
+        "🤍 Питание:\n"
+        "Индивидуальный расчёт КБЖУ, исходя из ваших особенностей, активности и образа жизни. "
+        "Анализ динамики и изменения расчёта по необходимости. Большие сборники завтраков, обедов и ужинов "
+        "с указанием КБЖУ каждого блюда.\n\n"
+        "🤍 Индивидуальная работа с отчётами:\n"
+        "— 2 раза в неделю проверяю отчёты по питанию, вношу корректировки для эффективного результата\n"
+        "— 2 раза в месяц проверяю отчёты по форме, фиксируем замеры для коррекции плана тренировок или КБЖУ\n\n"
+        "🤍 Абсолютно любая цель:\n"
+        "— снижение веса\n"
+        "— набор мышечной массы\n\n"
+        "🤍 Доступ к закрытому чату со всеми участницами проекта:\n"
+        "Обсуждаем результаты, делимся эмоциями и рецептами, поддерживаем друг друга каждый день! "
+        "Ты всегда можешь задать мне любой вопрос. Важно знать, что ты не одна — тебя всегда поддержат! 🫂"
+    )
+
+    await update.message.reply_text(features)
+    await update.message.reply_text("Выбери, что хочешь узнать:", reply_markup=get_main_menu_keyboard())
+
+async def send_project_info(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    desc = (
+        "Проект POLINAFIT — это комплексная работа, где важно абсолютно всё! Режим питания, тренировки, "
+        "поддержка от участниц проекта и лично меня! Это то место, где я помогу тебе дойти до результата, "
+        "доведу тебя за ручку до твоей цели, и ты не откатишься назад даже при непредвиденных обстоятельствах "
+        "(отпуск, стресс, травмы, болезнь и т.д.)"
+    )
+
+    await context.bot.send_message(chat_id=chat_id, text=desc)
+
+    features = (
+        "Что входит в проект:\n\n"
+        "🤍 Тренировки для любого уровня подготовки дома или в зале:\n"
+        "— лёгкие, для тех кто только начинает\n"
+        "— средней сложности, для тех кто уже занимается\n"
+        "— интенсивные, для тех кто тренируется регулярно и хочет прогрессировать\n\n"
+        "🤍 Питание:\n"
+        "Индивидуальный расчёт КБЖУ, исходя из ваших особенностей, активности и образа жизни. "
+        "Анализ динамики и изменения расчёта по необходимости. Большие сборники завтраков, обедов и ужинов "
+        "с указанием КБЖУ каждого блюда.\n\n"
+        "🤍 Индивидуальная работа с отчётами:\n"
+        "— 2 раза в неделю проверяю отчёты по питанию, вношу корректировки для эффективного результата\n"
+        "— 2 раза в месяц проверяю отчёты по форме, фиксируем замеры для коррекции плана тренировок или КБЖУ\n\n"
+        "🤍 Абсолютно любая цель:\n"
+        "— снижение веса\n"
+        "— набор мышечной массы\n\n"
+        "🤍 Доступ к закрытому чату со всеми участницами проекта:\n"
+        "Обсуждаем результаты, делимся эмоциями и рецептами, поддерживаем друг друга каждый день! "
+        "Ты всегда можешь задать мне любой вопрос. Важно знать, что ты не одна — тебя всегда поддержат! 🫂"
+    )
+
+    await context.bot.send_message(chat_id=chat_id, text=features)
+    await context.bot.send_message(chat_id=chat_id, text="Выбери, что хочешь узнать:", reply_markup=get_main_menu_keyboard())
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
-    caption = "В проекте подписка с доступом к тренировкам, питанию и чату."
+    caption = (
+        "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
+        "🤍 Анализ состояния для подбора питания и тренировок\n"
+        "🤍 Индивидуальный расчет КБЖУ и план тренировок, составленный лично мной\n"
+        "🤍 Тренировки на любую цель (жиросжигание, силовые и т.п.)\n"
+        "🤍 Возможность тренироваться где удобно — дома или в зале\n"
+        "🤍 Подробно расписанная техника каждого упражнения\n"
+        "🤍 Контроль питания и формы каждую неделю\n"
+        "🤍 Общий чат с участницами проекта для поддержки и обмена опытом\n"
+        "🤍 Возможность задавать любые вопросы по теме питания и тренировок\n"
+        "🤍 Огромный сборник простых и бюджетных рецептов с КБЖУ\n"
+        "🤍 Гайд по продуктам и путеводитель по питанию\n"
+        "🤍 Видео с ответами на частые вопросы"
+    )
 
     try:
-        await context.bot.send_photo(chat_id=query.message.chat_id, photo=photo_url, caption=caption, reply_markup=get_tariffs_keyboard())
-    except:
-        await context.bot.send_message(chat_id=query.message.chat_id, text=caption, reply_markup=get_tariffs_keyboard())
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=photo_url,
+            caption=caption,
+            reply_markup=get_tariffs_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка отправки фото тарифов: {e}")
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=caption,
+            reply_markup=get_tariffs_keyboard()
+        )
 
-async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query if update.callback_query else None
-    if query:
-        await query.answer()
-        chat_id = query.message.chat_id
-    else:
-        chat_id = update.message.chat_id
+async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    caption = (
+        "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
+        "🤍 Анализ состояния для подбора питания и тренировок\n"
+        "🤍 Индивидуальный расчет КБЖУ и план тренировок, составленный лично мной\n"
+        "🤍 Тренировки на любую цель (жиросжигание, силовые и т.п.)\n"
+        "🤍 Возможность тренироваться где удобно — дома или в зале\n"
+        "🤍 Подробно расписанная техника каждого упражнения\n"
+        "🤍 Контроль питания и формы каждую неделю\n"
+        "🤍 Общий чат с участницами проекта для поддержки и обмена опытом\n"
+        "🤍 Возможность задавать любые вопросы по теме питания и тренировок\n"
+        "🤍 Огромный сборник простых и бюджетных рецептов с КБЖУ\n"
+        "🤍 Гайд по продуктам и путеводитель по питанию\n"
+        "🤍 Видео с ответами на частые вопросы"
+    )
 
-    photos = [
+    try:
+        await update.message.reply_photo(photo=photo_url, caption=caption, reply_markup=get_tariffs_keyboard())
+    except Exception as e:
+        logger.error(f"Ошибка отправки фото тарифов: {e}")
+        await update.message.reply_text(caption, reply_markup=get_tariffs_keyboard())
+
+async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    review_photos = [
         "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
         "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
         "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
         "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg"
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
-    for i, url in enumerate(photos):
+    for i, url in enumerate(review_photos[:5]):
         try:
-            if query:
-                await context.bot.send_photo(chat_id=chat_id, photo=url)
-            else:
-                await update.message.reply_photo(photo=url)
-            if i < len(photos) - 1:
+            await context.bot.send_photo(chat_id=query.message.chat_id, photo=url)
+            if i < 4:
                 await asyncio.sleep(0.5)
-        except:
+        except Exception as e:
+            logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
 
-    text = "Хочешь так же? Выбирай тариф! 👇"
-    if query:
-        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=get_main_menu_keyboard())
-    else:
-        await update.message.reply_text(text, reply_markup=get_main_menu_keyboard())
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
+             "Хочешь тоже так? Жми 👇",
+        reply_markup=get_reviews_keyboard()
+    )
 
-# === PAYKEEPER ===
+async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    review_photos = [
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+    ]
+
+    for i, url in enumerate(review_photos[:5]):
+        try:
+            await update.message.reply_photo(photo=url)
+            if i < 4:
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
+            continue
+
+    await update.message.reply_text(
+        "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
+        "Хочешь тоже так? Жми 👇",
+        reply_markup=get_reviews_keyboard()
+    )
+
+# === PAYKEEPER ОБРАБОТЧИКИ ===
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     query = update.callback_query
     await query.answer()
@@ -363,6 +522,7 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
 
     tariff_info = tariff_map.get(tariff_data)
     if not tariff_info:
+        await query.edit_message_text("Ошибка: тариф не найден")
         return
 
     context.user_data['tariff'] = tariff_info
@@ -370,25 +530,34 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text=f"Вы выбрали: {tariff_info['name']}\n\nУкажите email для чека:",
+        text=f"Вы выбрали: {tariff_info['name']}\n\nПожалуйста, укажи свой email — я отправлю тебе чек после оплаты:",
         reply_markup=get_cancel_keyboard()
     )
 
-async def create_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     email = update.message.text.strip()
 
     if not is_valid_email(email):
-        await update.message.reply_text("❌ Некорректный email. Попробуйте:", reply_markup=get_cancel_keyboard())
+        await update.message.reply_text(
+            "📧 Некорректный email. Пример правильного формата:\n"
+            "`example@mail.ru` или `name@gmail.com`\n\n"
+            "Попробуй ещё раз:",
+            parse_mode="Markdown",
+            reply_markup=get_cancel_keyboard()
+        )
         return
 
     tariff_info = context.user_data.get('tariff')
     if not tariff_info:
-        await update.message.reply_text("Ошибка: начните с /start")
+        await update.message.reply_text("Ошибка: тариф не выбран. Начните с /start")
         return
 
     if not paykeeper:
-        await update.message.reply_text("⚠️ Оплата недоступна. Напишите @polinakaulkina")
+        await update.message.reply_text(
+            "⚠️ Система оплаты временно недоступна.\nПожалуйста, свяжитесь с администратором @polinakaulkina",
+            reply_markup=get_start_keyboard()
+        )
         return
 
     order_id = f"POLI_{user.id}_{int(time.time())}"
@@ -398,11 +567,15 @@ async def create_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount=tariff_info['price'],
         client_email=email,
         client_id=str(user.id),
-        service_name=f"POLINAFIT - {tariff_info['name']}"
+        service_name=f"Подписка POLINAFIT - {tariff_info['name']}"
     )
 
     if 'error' in result or 'invoice_id' not in result:
-        await update.message.reply_text("❌ Ошибка создания счета. Попробуйте позже.")
+        logger.error(f"Ошибка создания платежа: {result.get('error', 'Нет invoice_id')}")
+        await update.message.reply_text(
+            "❌ Не удалось создать счет. Попробуйте позже или свяжитесь с поддержкой.",
+            reply_markup=get_start_keyboard()
+        )
         return
 
     payment_info = {
@@ -415,39 +588,75 @@ async def create_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'order_id': order_id,
         'invoice_id': result['invoice_id'],
         'payment_link': result['payment_link'],
-        'status': 'created'
+        'status': 'created',
+        'created_at': datetime.datetime.now().isoformat()
     }
 
     PAYMENTS[order_id] = payment_info
     context.user_data['current_order_id'] = order_id
+    context.user_data['payment_step'] = 'waiting_payment'
     save_states()
 
-    text = f"💳 **Счет создан**\n\nТариф: {tariff_info['name']}\nСумма: {tariff_info['price']} ₽\n\nНажмите кнопку для оплаты:"
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_payment_keyboard(result['payment_link']))
+    payment_text = (
+        f"💳 **Счет на оплату создан**\n\n"
+        f"Тариф: {tariff_info['name']}\n"
+        f"Сумма: {tariff_info['price']} ₽\n"
+        f"Email: {email}\n\n"
+        f"Нажмите кнопку ниже для оплаты. После оплаты нажмите \"Проверить оплату\":"
+    )
 
-async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        payment_text,
+        parse_mode="Markdown",
+        reply_markup=get_payment_keyboard(result['payment_link'])
+    )
+
+async def check_payment_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("Проверяем...")
+    await query.answer("Проверяем статус...")
 
     order_id = context.user_data.get('current_order_id')
     if not order_id or order_id not in PAYMENTS:
-        await query.edit_message_text("❌ Платеж не найден. Начните с /start")
+        await query.edit_message_text(
+            "❌ Информация о платеже не найдена. Начните сначала с /start",
+            reply_markup=get_start_keyboard()
+        )
         return
 
     payment_info = PAYMENTS[order_id]
-    result = await paykeeper.check_payment_status(payment_info['invoice_id'])
 
-    if result.get('status') == 'paid':
+    if not paykeeper:
+        await query.edit_message_text("⚠️ Система проверки недоступна")
+        return
+
+    status_result = await paykeeper.check_payment_status(payment_info['invoice_id'])
+
+    if 'error' in status_result:
+        await query.edit_message_text(
+            "❌ Ошибка проверки. Попробуйте позже.",
+            reply_markup=get_payment_keyboard(payment_info['payment_link'])
+        )
+        return
+
+    status = status_result.get('status', 'unknown')
+
+    if status == 'paid':
         await process_successful_payment(order_id, payment_info, query, context)
     else:
         await query.edit_message_text(
-            "⏳ Ожидание оплаты...\nЕсли вы оплатили, подождите 1-2 минуты.",
+            f"⏳ **Статус: Ожидание оплаты**\n\n"
+            f"Платеж еще не поступил.\n"
+            f"Если вы уже оплатили, подождите 1-2 минуты и проверьте снова.\n\n"
+            f"Если возникли проблемы, напишите @polinakaulkina",
+            parse_mode="Markdown",
             reply_markup=get_payment_keyboard(payment_info['payment_link'])
         )
 
-async def process_successful_payment(order_id, payment_info, query, context):
+async def process_successful_payment(order_id: str, payment_info: dict, query, context: ContextTypes.DEFAULT_TYPE):
     user_id = payment_info['user_id']
+
     PAYMENTS[order_id]['status'] = 'paid'
+    PAYMENTS[order_id]['paid_at'] = datetime.datetime.now().isoformat()
 
     days = payment_info.get('days', 30)
     paid_until = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime('%Y-%m-%d')
@@ -458,48 +667,103 @@ async def process_successful_payment(order_id, payment_info, query, context):
         'payment_id': order_id,
         'email': payment_info['email']
     }
+
     save_states()
 
     if SHEET:
         try:
-            row = [str(user_id), payment_info.get('username', ''), '', '', '', '', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), payment_info['tariff'], payment_info['email'], 'ОПЛАЧЕНО', order_id]
-            await asyncio.get_event_loop().run_in_executor(executor, partial(SHEET.append_row, row))
-        except:
-            pass
+            row_data = [
+                str(user_id),
+                payment_info.get('username', ''),
+                '',
+                '',
+                '',
+                '',
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                payment_info['tariff'],
+                payment_info['email'],
+                'ОПЛАЧЕНО',
+                order_id
+            ]
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(executor, partial(SHEET.append_row, row_data))
+        except Exception as e:
+            logger.error(f"Ошибка сохранения в Google Sheets: {e}")
 
-    text = f"🎉 **ОПЛАТА УСПЕШНА!**\n\nТариф: {payment_info['tariff']}\nДо: {paid_until}\n\nДобро пожаловать!"
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_continue_keyboard())
+    success_text = (
+        f"🎉 **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
+        f"Тариф: {payment_info['tariff']}\n"
+        f"Сумма: {payment_info['amount']} ₽\n"
+        f"Подписка активна до: {paid_until}\n\n"
+        f"Добро пожаловать в POLINAFIT! 💪\n"
+        f"Нажмите \"Продолжить\" для инструкций:"
+    )
+
+    await query.edit_message_text(
+        success_text,
+        parse_mode="Markdown",
+        reply_markup=get_continue_keyboard()
+    )
 
     if ADMIN_ID:
         try:
-            await context.bot.send_message(chat_id=ADMIN_ID, text=f"💰 Оплата: {payment_info['tariff']} - {payment_info['amount']} ₽")
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"💰 Новая оплата!\n{payment_info['tariff']}\n{payment_info['amount']} ₽\n@{payment_info.get('username', 'N/A')}"
+            )
         except:
             pass
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     context.user_data.clear()
-    await context.bot.send_message(chat_id=query.message.chat_id, text="Отменено.", reply_markup=get_main_menu_keyboard())
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Действие отменено. Что хочешь сделать?",
+        reply_markup=get_main_menu_keyboard()
+    )
 
 async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    text = "Добро пожаловать! 🥳\n\n1️⃣ @recipes_group\n2️⃣ @polinakaulkina"
-    await context.bot.send_message(chat_id=query.message.chat_id, text=text)
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    instruction = (
+        "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
+        "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
+        "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
+        "1️⃣ Зайди в закрытый канал с материалами проекта: @recipes_group\n"
+        "2️⃣ Нажми на закреплённое сообщение «НАВИГАЦИЯ»\n"
+        "3️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
+        "4️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinakaulkina)\n"
+        "5️⃣ Заполни анкету подробно и отправь мне\n"
+        "6️⃣ Вернись в закрытый канал и изучай материалы последовательно (сверху вниз)\n\n"
+        "❗️В навигации также есть кнопки для отчётов по питанию и форме — они тебе понадобятся регулярно.\n\n"
+        "ЕСЛИ ТЫ ВСЁ ПОНЯЛА, НАЖМИ «ПРОДОЛЖИТЬ» 👇"
+    )
+
+    await context.bot.send_message(chat_id=query.message.chat_id, text=instruction)
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 @recipes_group",
+        reply_markup=get_continue_keyboard()
+    )
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
 
     handlers = {
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
-        'reviews': reviews_command,
+        'reviews': send_reviews,
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
-        'check_payment': check_payment,
+        'check_payment': check_payment_status_handler,
         'cancel': handle_cancel,
         'continue': handle_continue
     }
@@ -507,28 +771,62 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     handler = handlers.get(data)
     if handler:
         await handler(update, context)
+    else:
+        await query.answer(f"Неизвестная команда: {data}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
     if context.user_data.get('payment_step') == 'waiting_email':
-        await create_payment(update, context)
+        await create_paykeeper_payment(update, context)
         return
 
     text = update.message.text.lower()
-    commands = {'/start': start, '/project': project_command, '/tariffs': tariffs_command, '/reviews': reviews_command}
 
-    if text in commands:
-        await commands[text](update, context)
+    command_map = {
+        '/start': start,
+        '/project': project_command,
+        '/tariffs': tariffs_command,
+        '/reviews': reviews_command
+    }
+
+    if text in command_map:
+        await command_map[text](update, context)
     else:
-        await update.message.reply_text("Используйте кнопки:", reply_markup=get_start_keyboard())
+        await update.message.reply_text(
+            "Я не понял ваше сообщение. Используйте команды меню или кнопки ниже:",
+            reply_markup=get_start_keyboard()
+        )
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if ADMIN_ID == 0 or update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔️ Эта команда только для администратора.")
         return
 
-    paid = len([p for p in PAYMENTS.values() if p['status'] == 'paid'])
-    total = sum([p['amount'] for p in PAYMENTS.values() if p['status'] == 'paid'])
+    total_payments = len(PAYMENTS)
+    paid_payments = len([p for p in PAYMENTS.values() if p['status'] == 'paid'])
+    total_amount = sum([p['amount'] for p in PAYMENTS.values() if p['status'] == 'paid'])
 
-    await update.message.reply_text(f"📊 Статистика\n\n💰 Оплачено: {paid}\n💵 Сумма: {total} ₽")
+    stats_text = (
+        f"📊 **Статистика бота:**\n\n"
+        f"💰 Всего платежей: {total_payments}\n"
+        f"✅ Оплачено: {paid_payments}\n"
+        f"💵 Общая сумма: {total_amount} ₽\n"
+        f"👥 Активных подписок: {len(PAID_USERS)}"
+    )
+
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Ошибка при обработке обновления: {context.error}", exc_info=True)
+    try:
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ Произошла временная ошибка. Пожалуйста, попробуйте снова через несколько секунд.",
+                reply_markup=get_start_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
 
 # === AIOHTTP WEB SERVER С HEALTH CHECK ===
 async def health_handler(request):
@@ -553,6 +851,7 @@ async def paykeeper_webhook_handler(request):
 
         if PAYKEEPER_SECRET:
             if data.get('secret') != PAYKEEPER_SECRET:
+                logger.warning("Неверное секретное слово в webhook!")
                 return web.Response(status=403)
 
         order_id = data.get('orderid', '')
@@ -572,7 +871,7 @@ async def paykeeper_webhook_handler(request):
                 'email': payment_info['email']
             }
             save_states()
-            logger.info(f"✅ Webhook активация для user_id={user_id}")
+            logger.info(f"✅ Webhook активация подписки для user_id={user_id}")
 
         return web.Response(text="OK", status=200)
     except Exception as e:
@@ -592,7 +891,6 @@ async def run_web_server():
     await site.start()
     logger.info(f"✅ Web сервер запущен на порту {PORT}")
     logger.info(f"✅ Health check: http://0.0.0.0:{PORT}/health")
-    logger.info(f"✅ Webhook: http://0.0.0.0:{PORT}/{TOKEN[:10]}...")
 
 # === WRAPPERS ===
 async def queued_start(update, context):
@@ -611,12 +909,12 @@ async def queued_stats(update, context):
     await message_queue.add(update.effective_user.id, update, context, admin_stats)
 
 async def queued_callback(update, context):
-    await message_queue.add(update.effective_user.id, update, context, handle_callback)
+    await message_queue.add(update.effective_user.id, update, context, handle_callback_query)
 
 async def queued_message(update, context):
     await message_queue.add(update.effective_user.id, update, context, handle_message)
 
-# === ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ДЛЯ APPLICATION ===
+# === ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ===
 application = None
 
 # === ЗАПУСК ===
@@ -626,13 +924,12 @@ async def main():
     load_states()
 
     logger.info("=" * 60)
-    logger.info("🤖 POLINAFIT Bot с Health Check")
+    logger.info("🤖 POLINAFIT Bot с Health Check и PayKeeper")
+    logger.info(f"PayKeeper: {'✅' if paykeeper else '❌'} {PAYKEEPER_SERVER}")
     logger.info("=" * 60)
 
-    # Создаем приложение
     application = Application.builder().token(TOKEN).build()
 
-    # Регистрируем обработчики
     application.add_handler(CommandHandler("start", queued_start))
     application.add_handler(CommandHandler("project", queued_project))
     application.add_handler(CommandHandler("tariffs", queued_tariffs))
@@ -640,11 +937,11 @@ async def main():
     application.add_handler(CommandHandler("stats", queued_stats))
     application.add_handler(CallbackQueryHandler(queued_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, queued_message))
+    application.add_error_handler(error_handler)
 
-    # Устанавливаем команды
     await application.bot.set_my_commands([
-        BotCommand("start", "Начать"),
-        BotCommand("project", "О проекте"),
+        BotCommand("start", "Начать работу"),
+        BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Тарифы"),
         BotCommand("reviews", "Отзывы"),
         BotCommand("stats", "Статистика (админ)")
@@ -657,13 +954,11 @@ async def main():
     async with application:
         await application.start()
 
-        # Устанавливаем webhook если есть URL
         if WEBHOOK_URL:
             webhook_url = f"{WEBHOOK_URL}/{TOKEN}"
             await application.bot.set_webhook(url=webhook_url)
             logger.info(f"✅ Webhook установлен: {webhook_url}")
 
-        # Держим бота запущенным
         await asyncio.Event().wait()
 
 if __name__ == "__main__":
