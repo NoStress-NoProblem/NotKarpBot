@@ -11,9 +11,19 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
+      - key: ADMIN_ID
+        sync: false
       - key: WEBHOOK_URL
         sync: false
       - key: GOOGLE_CREDS_JSON
+        sync: false
+      - key: PAYKEEPER_SERVER
+        sync: false
+      - key: PAYKEEPER_USER
+        sync: false
+      - key: PAYKEEPER_PASSWORD
+        sync: false
+      - key: PAYKEEPER_SECRET
         sync: false
       - key: PORT
         value: 10000
@@ -21,7 +31,5 @@ services:
         value: 3.12.8
       - key: PYTHONUNBUFFERED
         value: true
-      - key: ADMIN_ID
-        sync: false
     healthCheckPath: /health
     autoDeploy: true
