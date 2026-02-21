@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # === КОНСТАНТЫ ===
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinakaulkina")  # Никнейм админа для чека
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinakaulkina")
 
 if not TOKEN:
     logger.error("Переменная BOT_TOKEN не задана!")
@@ -54,9 +54,9 @@ USER_STATES = {}
 start_time = time.time()
 
 # СТИКЕРЫ
-STICKER_HELLO = "CAACAgIAAxkBAAENWKZnO-3P7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"  # Приветствие
-STICKER_HEART = "CAACAgIAAxkBAAENWKpnO-3QnJ7rX9vK7mHh8W2j4L5r9AACQAADr8ZRGmVJ_w7G1t9zNgQ"  # Красное сердце
-STICKER_WHITE_HEART = "CAACAgIAAxkBAAENWKxnO-3R7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"  # Белое сердце (замените на реальный)
+STICKER_HELLO = "CAACAgIAAxkBAAENWKZnO-3P7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"
+STICKER_HEART = "CAACAgIAAxkBAAENWKpnO-3QnJ7rX9vK7mHh8W2j4L5r9AACQAADr8ZRGmVJ_w7G1t9zNgQ"
+STICKER_WHITE_HEART = "CAACAgIAAxkBAAENWKxnO-3R7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"
 
 # === ОЧЕРЕДЬ СООБЩЕНИЙ С ЗАДЕРЖКОЙ 0.5 СЕК ===
 class MessageQueue:
@@ -65,7 +65,7 @@ class MessageQueue:
         self._processing = set()
         self._lock = asyncio.Lock()
         self._last_message_time = defaultdict(float)
-        self._rate_limit = 0.5  # 0.5 секунды между сообщениями
+        self._rate_limit = 0.5
 
     async def add(self, user_id: int, update: Update, context: ContextTypes.DEFAULT_TYPE, handler_func):
         async with self._lock:
@@ -102,24 +102,6 @@ class MessageQueue:
                     pass
 
 message_queue = MessageQueue()
-
-# === ГЛОБАЛЬНАЯ ЗАДЕРЖКА ДЛЯ ВСЕХ СООБЩЕНИЙ ===
-async def send_message_with_delay(bot, chat_id, text=None, photo=None, caption=None, reply_markup=None, sticker=None, parse_mode=None):
-    """Универсальная функция отправки сообщений с задержкой 0.5 сек"""
-    try:
-        if sticker:
-            await bot.send_sticker(chat_id=chat_id, sticker=sticker)
-            await asyncio.sleep(0.5)
-        
-        if photo:
-            await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
-            await asyncio.sleep(0.5)
-        elif text:
-            await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
-            await asyncio.sleep(0.5)
-            
-    except Exception as e:
-        logger.error(f"Ошибка отправки сообщения: {e}")
 
 # === ФУНКЦИИ СОХРАНЕНИЯ ===
 def save_states():
@@ -351,8 +333,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
+    # УДАЛЕНО ПРЕДУПРЕЖДЕНИЕ О ЗАДЕРЖКЕ
     caption = (
-        "⚠️ Возможна задержка ответа до 1 минуты\n\n"
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
         "Я даю рекомендации по питанию, после того как подробно изучу каждый индивидуальный случай, "
@@ -765,7 +747,6 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
 
     save_states()
 
-    # Запись в Google Sheets
     if SHEET:
         try:
             row_data = [
@@ -789,7 +770,6 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         except Exception as e:
             logger.error(f"Ошибка сохранения в Google Sheets: {e}")
 
-    # Основное сообщение об успешной оплате
     success_text = (
         f"🎉 **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
         f"Тариф: {payment_info['tariff']}\n"
@@ -805,7 +785,6 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         reply_markup=get_continue_keyboard()
     )
 
-    # ДОБАВЛЕНО: Сообщение о чеке с задержкой
     await asyncio.sleep(0.5)
     
     receipt_text = (
@@ -817,14 +796,12 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         text=receipt_text
     )
     
-    # Отправка стикера белого сердца с задержкой
     await asyncio.sleep(0.5)
     try:
         await context.bot.send_sticker(chat_id=user_id, sticker=STICKER_WHITE_HEART)
     except Exception as e:
         logger.error(f"Ошибка отправки стикера белого сердца: {e}")
 
-    # Уведомление админу
     if ADMIN_ID:
         try:
             admin_text = (
@@ -980,7 +957,6 @@ async def check_subscriptions_reminders(bot):
                     paid_until = datetime.datetime.strptime(user_data['paid_until'], '%Y-%m-%d')
                     paid_until_end = paid_until.replace(hour=23, minute=59, second=59)
                     
-                    # Напоминание за 1 день
                     reminder_time = paid_until_end - datetime.timedelta(days=1)
                     time_diff = (now - reminder_time).total_seconds()
                     if 0 <= time_diff <= 3600:
@@ -989,7 +965,6 @@ async def check_subscriptions_reminders(bot):
                             REMINDERS_SENT[user_id_str] = now.isoformat()
                             save_states()
                     
-                    # Уведомление через 5 минут после окончания
                     expiry_notification_time = paid_until_end + datetime.timedelta(minutes=5)
                     expiry_diff = (now - expiry_notification_time).total_seconds()
                     
@@ -1005,7 +980,6 @@ async def check_subscriptions_reminders(bot):
                                     del PAID_USERS[user_id_str]
                                     save_states()
                     
-                    # Уведомление админу через 7 минут
                     admin_notification_time = paid_until_end + datetime.timedelta(minutes=7)
                     admin_diff = (now - admin_notification_time).total_seconds()
                     
