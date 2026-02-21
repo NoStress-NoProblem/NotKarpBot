@@ -165,7 +165,8 @@ def init_google_sheets():
         SHEET = CLIENT.open("Клиенты фитнес-бота").sheet1
 
         headers = SHEET.row_values(1)
-        expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Статус оплаты", "ID платежа"]
+        # ОБНОВЛЕННЫЕ ЗАГОЛОВКИ
+        expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Фамилия Имя", "Номер телефона", "Подписка до", "Статус", "ID платежа"]
 
         if not headers:
             SHEET.append_row(expected_headers)
@@ -253,10 +254,15 @@ if PAYKEEPER_SERVER and PAYKEEPER_USER and PAYKEEPER_PASSWORD:
 else:
     logger.warning("⚠️ PayKeeper не настроен")
 
-# === ВАЛИДАЦИЯ EMAIL ===
+# === ВАЛИДАЦИЯ ===
 def is_valid_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
+
+def is_valid_phone(phone: str) -> bool:
+    # Простая валидация: только цифры, длина от 10 до 15 символов
+    cleaned = re.sub(r'\D', '', phone)
+    return len(cleaned) >= 10 and len(cleaned) <= 15
 
 # === КЛАВИАТУРЫ ===
 def get_start_keyboard():
@@ -269,7 +275,9 @@ def get_main_menu_keyboard():
     ])
 
 def get_tariffs_keyboard():
+    # ДОБАВЛЕН ТАРИФ 3 ДНЯ ЗА 10 РУБЛЕЙ
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("3 дня (10 ₽)", callback_data='tariff_3')],
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
         [InlineKeyboardButton("1 месяц (3000 ₽)", callback_data='tariff_30')],
         [InlineKeyboardButton("3 месяца (6990 ₽)", callback_data='tariff_90')]
@@ -514,7 +522,9 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
 
+    # ДОБАВЛЕН ТАРИФ 3 ДНЯ
     tariff_map = {
+        'tariff_3': {'name': '3 дня (10 ₽)', 'price': 10, 'days': 3},
         'tariff_15': {'name': '15 дней (1990 ₽)', 'price': 1990, 'days': 15},
         'tariff_30': {'name': '1 месяц (3000 ₽)', 'price': 3000, 'days': 30},
         'tariff_90': {'name': '3 месяца (6990 ₽)', 'price': 6990, 'days': 90}
@@ -526,11 +536,52 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         return
 
     context.user_data['tariff'] = tariff_info
-    context.user_data['payment_step'] = 'waiting_email'
+    # ТЕПЕРЬ СНАЧАЛА СПРАШИВАЕМ ФАМИЛИЮ И ИМЯ
+    context.user_data['payment_step'] = 'waiting_fullname'
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text=f"Вы выбрали: {tariff_info['name']}\n\nПожалуйста, укажи свой email — я отправлю тебе чек после оплаты:",
+        text=f"Вы выбрали: {tariff_info['name']}\n\nПожалуйста, укажи свою Фамилию и Имя (пример: Иванова Светлана):",
+        reply_markup=get_cancel_keyboard()
+    )
+
+async def handle_fullname_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    fullname = update.message.text.strip()
+    
+    # Простая валидация: должно быть минимум 2 слова
+    if len(fullname.split()) < 2:
+        await update.message.reply_text(
+            "⚠️ Пожалуйста, введи Фамилию и Имя полностью (пример: Иванова Светлана):",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+    
+    context.user_data['fullname'] = fullname
+    # ТЕПЕРЬ СПРАШИВАЕМ НОМЕР ТЕЛЕФОНА
+    context.user_data['payment_step'] = 'waiting_phone'
+    
+    await update.message.reply_text(
+        "Отлично! Теперь укажи номер телефона (пример: 89105441100):",
+        reply_markup=get_cancel_keyboard()
+    )
+
+async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    phone = update.message.text.strip()
+    
+    if not is_valid_phone(phone):
+        await update.message.reply_text(
+            "📱 Некорректный номер телефона. Пожалуйста, введи номер в формате: 89105441100\n\n"
+            "Попробуй ещё раз:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+    
+    context.user_data['phone'] = phone
+    # ТЕПЕРЬ СПРАШИВАЕМ EMAIL
+    context.user_data['payment_step'] = 'waiting_email'
+    
+    await update.message.reply_text(
+        "Отлично! Теперь укажи свой email — я отправлю тебе чек после оплаты:",
         reply_markup=get_cancel_keyboard()
     )
 
@@ -560,6 +611,9 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
+    fullname = context.user_data.get('fullname', '')
+    phone = context.user_data.get('phone', '')
+
     order_id = f"POLI_{user.id}_{int(time.time())}"
 
     result = await paykeeper.create_invoice(
@@ -581,6 +635,8 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
     payment_info = {
         'user_id': user.id,
         'username': user.username,
+        'fullname': fullname,
+        'phone': phone,
         'email': email,
         'tariff': tariff_info['name'],
         'amount': tariff_info['price'],
@@ -601,6 +657,8 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
         f"💳 **Счет на оплату создан**\n\n"
         f"Тариф: {tariff_info['name']}\n"
         f"Сумма: {tariff_info['price']} ₽\n"
+        f"Фамилия Имя: {fullname}\n"
+        f"Телефон: {phone}\n"
         f"Email: {email}\n\n"
         f"Нажмите кнопку ниже для оплаты. После оплаты нажмите \"Проверить оплату\":"
     )
@@ -670,20 +728,24 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
 
     save_states()
 
+    # ОБНОВЛЕННАЯ ЗАПИСЬ В GOOGLE SHEETS С НОВЫМИ СТОЛБЦАМИ
     if SHEET:
         try:
             row_data = [
-                str(user_id),
-                payment_info.get('username', ''),
-                '',
-                '',
-                '',
-                '',
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                payment_info['tariff'],
-                payment_info['email'],
-                'ОПЛАЧЕНО',
-                order_id
+                str(user_id),                                    # ID
+                payment_info.get('username', ''),                # Username
+                '',                                             # Имя (пустое, т.к. теперь есть Фамилия Имя)
+                '',                                             # Рост
+                '',                                             # Вес
+                '',                                             # Калораж
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # Дата
+                payment_info['tariff'],                           # Тариф
+                payment_info['email'],                          # Email
+                payment_info.get('fullname', ''),              # Фамилия Имя
+                payment_info.get('phone', ''),                 # Номер телефона
+                paid_until,                                     # Подписка до
+                'ОПЛАЧЕНО',                                     # Статус
+                order_id                                        # ID платежа
             ]
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(executor, partial(SHEET.append_row, row_data))
@@ -705,14 +767,21 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         reply_markup=get_continue_keyboard()
     )
 
+    # ОБНОВЛЕННОЕ УВЕДОМЛЕНИЕ АДМИНУ С ПОЛНЫМИ ДАННЫМИ
     if ADMIN_ID:
         try:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"💰 Новая оплата!\n{payment_info['tariff']}\n{payment_info['amount']} ₽\n@{payment_info.get('username', 'N/A')}"
+            admin_text = (
+                f"💰 Новая оплата!\n\n"
+                f"Тариф: {payment_info['tariff']}\n"
+                f"Сумма: {payment_info['amount']} ₽\n"
+                f"Логин: @{payment_info.get('username', 'N/A')}\n"
+                f"Фамилия Имя: {payment_info.get('fullname', 'N/A')}\n"
+                f"Телефон: {payment_info.get('phone', 'N/A')}\n"
+                f"Email: {payment_info.get('email', 'N/A')}"
             )
-        except:
-            pass
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text)
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления админу: {e}")
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -760,6 +829,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
         'reviews': send_reviews,
+        'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),  # ДОБАВЛЕН ТАРИФ 3 ДНЯ
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
@@ -776,8 +846,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    payment_step = context.user_data.get('payment_step')
 
-    if context.user_data.get('payment_step') == 'waiting_email':
+    # ОБРАБОТКА НОВЫХ ШАГОВ: ФАМИЛИЯ ИМЯ -> ТЕЛЕФОН -> EMAIL
+    if payment_step == 'waiting_fullname':
+        await handle_fullname_input(update, context)
+        return
+    elif payment_step == 'waiting_phone':
+        await handle_phone_input(update, context)
+        return
+    elif payment_step == 'waiting_email':
         await create_paykeeper_payment(update, context)
         return
 
