@@ -52,6 +52,10 @@ executor = ThreadPoolExecutor(max_workers=4)
 USER_STATES = {}
 start_time = time.time()
 
+# СТИКЕРЫ ДЛЯ НАПОМИНАНИЙ
+STICKER_HELLO = "CAACAgIAAxkBAAENWKZnO-3P7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"  # Приветствие
+STICKER_HEART = "CAACAgIAAxkBAAENWKpnO-3QnJ7rX9vK7mHh8W2j4L5r9AACQAADr8ZRGmVJ_w7G1t9zNgQ"  # Красное сердце
+
 # === ОЧЕРЕДЬ СООБЩЕНИЙ С ЗАДЕРЖКОЙ 0.5 СЕК ===
 class MessageQueue:
     def __init__(self):
@@ -100,15 +104,22 @@ message_queue = MessageQueue()
 # === ФУНКЦИИ СОХРАНЕНИЯ ===
 def save_states():
     try:
-        data = {'user_states': USER_STATES, 'payments': PAYMENTS, 'paid_users': PAID_USERS}
+        data = {
+            'user_states': USER_STATES, 
+            'payments': PAYMENTS, 
+            'paid_users': PAID_USERS,
+            'reminders_sent': REMINDERS_SENT,
+            'expired_notifications_sent': EXPIRED_NOTIFICATIONS_SENT,
+            'admin_expiry_notifications_sent': ADMIN_EXPIRY_NOTIFICATIONS_SENT
+        }
         with open('user_states.json', 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
         logger.debug(f"Сохранено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
     except Exception as e:
         logger.error(f"Ошибка сохранения состояний: {e}")
 
 def load_states():
-    global USER_STATES, PAYMENTS, PAID_USERS
+    global USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT
     if os.path.exists('user_states.json'):
         try:
             with open('user_states.json', 'r', encoding='utf-8') as f:
@@ -116,12 +127,15 @@ def load_states():
             USER_STATES = data.get('user_states', {})
             PAYMENTS = data.get('payments', {})
             PAID_USERS = data.get('paid_users', {})
+            REMINDERS_SENT = data.get('reminders_sent', {})
+            EXPIRED_NOTIFICATIONS_SENT = data.get('expired_notifications_sent', {})
+            ADMIN_EXPIRY_NOTIFICATIONS_SENT = data.get('admin_expiry_notifications_sent', {})
             logger.info(f"Загружено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
         except Exception as e:
             logger.error(f"Ошибка загрузки состояний: {e}")
-            USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
+            USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}, {}, {}, {}
     else:
-        USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
+        USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}, {}, {}, {}
 
 # === GOOGLE SHEETS ===
 def init_google_sheets():
@@ -299,6 +313,9 @@ def get_continue_keyboard():
 def get_cancel_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Отмена", callback_data='cancel')]])
 
+def get_renew_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Продлить подписку 💰", callback_data='tariffs')]])
+
 # === ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -317,7 +334,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
+    # ДОБАВЛЕНО ПРЕДУПРЕЖДЕНИЕ О ЗАДЕРЖКЕ В НАЧАЛО СООБЩЕНИЯ
     caption = (
+        "⚠️ Возможна задержка ответа до 1 минуты\n\n"
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
         "Я даю рекомендации по питанию, после того как подробно изучу каждый индивидуальный случай, "
@@ -724,7 +743,10 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         'tariff': payment_info['tariff'],
         'paid_until': paid_until,
         'payment_id': order_id,
-        'email': payment_info['email']
+        'email': payment_info['email'],
+        'fullname': payment_info.get('fullname', ''),
+        'phone': payment_info.get('phone', ''),
+        'username': payment_info.get('username', '')
     }
 
     save_states()
@@ -907,6 +929,169 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
 
+# === СИСТЕМА НАПОМИНАНИЙ О ПОДПИСКЕ ===
+REMINDERS_SENT = {}  # user_id -> datetime когда было отправлено напоминание
+EXPIRED_NOTIFICATIONS_SENT = {}  # user_id -> datetime когда было отправлено уведомление об окончании
+ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}  # user_id -> datetime когда было отправлено уведомление админу об окончании
+
+# Словарь для хранения данных пользователей перед удалением из PAID_USERS
+EXPIRED_USERS_DATA = {}
+
+async def check_subscriptions_reminders(bot):
+    """Проверка и отправка напоминаний о подписке"""
+    while True:
+        try:
+            now = datetime.datetime.now()
+            
+            for user_id_str, user_data in list(PAID_USERS.items()):
+                try:
+                    paid_until = datetime.datetime.strptime(user_data['paid_until'], '%Y-%m-%d')
+                    # Устанавливаем время окончания на конец дня (23:59:59)
+                    paid_until_end = paid_until.replace(hour=23, minute=59, second=59)
+                    
+                    # Напоминание за 1 день до окончания
+                    reminder_time = paid_until_end - datetime.timedelta(days=1)
+                    
+                    # Проверяем, нужно ли отправить напоминание (в течение часа от reminder_time)
+                    time_diff = (now - reminder_time).total_seconds()
+                    if 0 <= time_diff <= 3600:  # В пределах часа после времени напоминания
+                        if user_id_str not in REMINDERS_SENT:
+                            await send_reminder(bot, int(user_id_str), user_data, paid_until)
+                            REMINDERS_SENT[user_id_str] = now.isoformat()
+                            save_states()
+                    
+                    # Уведомление об окончании подписки (через 5 минут после окончания)
+                    expiry_notification_time = paid_until_end + datetime.timedelta(minutes=5)
+                    expiry_diff = (now - expiry_notification_time).total_seconds()
+                    
+                    if expiry_diff >= 0 and expiry_diff <= 3600:  # В пределах часа после времени уведомления
+                        if user_id_str not in EXPIRED_NOTIFICATIONS_SENT:
+                            # Сохраняем данные пользователя перед удалением
+                            EXPIRED_USERS_DATA[user_id_str] = user_data.copy()
+                            
+                            # Проверяем, не продлил ли пользователь подписку
+                            if user_id_str not in PAID_USERS or PAID_USERS[user_id_str]['paid_until'] == user_data['paid_until']:
+                                await send_expiry_notification(bot, int(user_id_str), user_data)
+                                EXPIRED_NOTIFICATIONS_SENT[user_id_str] = now.isoformat()
+                                save_states()
+                                # Удаляем из активных подписчиков
+                                if user_id_str in PAID_USERS:
+                                    del PAID_USERS[user_id_str]
+                                    save_states()
+                    
+                    # Уведомление админу через 7 минут после окончания подписки
+                    admin_notification_time = paid_until_end + datetime.timedelta(minutes=7)
+                    admin_diff = (now - admin_notification_time).total_seconds()
+                    
+                    if admin_diff >= 0 and admin_diff <= 3600:  # В пределах часа после времени уведомления
+                        if user_id_str not in ADMIN_EXPIRY_NOTIFICATIONS_SENT:
+                            # Проверяем, не продлил ли пользователь подписку
+                            current_data = PAID_USERS.get(user_id_str)
+                            is_expired = True
+                            
+                            if current_data and current_data['paid_until'] != user_data['paid_until']:
+                                is_expired = False  # Пользователь продлил подписку
+                            
+                            if is_expired:
+                                # Берем данные из сохраненных или текущих
+                                notify_data = EXPIRED_USERS_DATA.get(user_id_str, user_data)
+                                await send_admin_expiry_notification(bot, int(user_id_str), notify_data)
+                                ADMIN_EXPIRY_NOTIFICATIONS_SENT[user_id_str] = now.isoformat()
+                                save_states()
+                                # Удаляем из сохраненных данных
+                                if user_id_str in EXPIRED_USERS_DATA:
+                                    del EXPIRED_USERS_DATA[user_id_str]
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка проверки подписки для {user_id_str}: {e}")
+                    continue
+            
+            # Проверяем каждые 5 минут
+            await asyncio.sleep(300)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в цикле напоминаний: {e}")
+            await asyncio.sleep(300)
+
+async def send_reminder(bot, user_id: int, user_data: dict, paid_until: datetime.datetime):
+    """Отправка напоминания за 1 день до окончания подписки"""
+    try:
+        # Отправляем стикер приветствия
+        await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
+        
+        # Форматируем дату и время окончания
+        expiry_datetime = paid_until.strftime('%d.%m.%Y в 23:59')
+        
+        message = (
+            f"Привет, подружка! 👋\n\n"
+            f"Завтра ({expiry_datetime}) у тебя заканчивается подписка в проекте POLINAFIT, "
+            f"надеюсь у тебя все хорошо и ты остаешься 💪"
+        )
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=message,
+            reply_markup=get_renew_keyboard()
+        )
+        
+        logger.info(f"Отправлено напоминание о подписке пользователю {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
+
+async def send_expiry_notification(bot, user_id: int, user_data: dict):
+    """Отправка уведомления об окончании подписки"""
+    try:
+        # Отправляем стикер приветствия
+        await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
+        
+        message = (
+            f"Привет, подружка! 👋\n\n"
+            f"Жаль, что ты не продлила подписку, доступ к каналу и информации будет приостановлен. "
+            f"Рада была с тобой работать ❤️"
+        )
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=message,
+            reply_markup=get_renew_keyboard()
+        )
+        
+        # Отправляем стикер сердца
+        await bot.send_sticker(chat_id=user_id, sticker=STICKER_HEART)
+        
+        logger.info(f"Отправлено уведомление об окончании подписки пользователю {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления об окончании пользователю {user_id}: {e}")
+
+async def send_admin_expiry_notification(bot, user_id: int, user_data: dict):
+    """Отправка уведомления админу о непродленной подписке"""
+    try:
+        if not ADMIN_ID:
+            logger.warning("ADMIN_ID не настроен, уведомление админу не отправлено")
+            return
+        
+        fullname = user_data.get('fullname', 'Не указано')
+        username = user_data.get('username', 'Не указан')
+        phone = user_data.get('phone', 'Не указан')
+        tariff = user_data.get('tariff', 'Неизвестен')
+        
+        admin_text = (
+            f"⚠️ Пользователь не продлил подписку!\n\n"
+            f"Фамилия Имя: {fullname}\n"
+            f"Telegram ID: {user_id}\n"
+            f"Никнейм: @{username}\n"
+            f"Номер телефона: {phone}\n"
+            f"Тариф который оформлял (истек): {tariff}"
+        )
+        
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_text)
+        logger.info(f"Отправлено уведомление админу о непродленной подписке пользователя {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления админу о непродленной подписке: {e}")
+
 # === AIOHTTP WEB SERVER С HEALTH CHECK ===
 async def health_handler(request):
     """Health check endpoint для Render"""
@@ -947,7 +1132,10 @@ async def paykeeper_webhook_handler(request):
                 'tariff': payment_info['tariff'],
                 'paid_until': paid_until,
                 'payment_id': order_id,
-                'email': payment_info['email']
+                'email': payment_info['email'],
+                'fullname': payment_info.get('fullname', ''),
+                'phone': payment_info.get('phone', ''),
+                'username': payment_info.get('username', '')
             }
             save_states()
             logger.info(f"✅ Webhook активация подписки для user_id={user_id}")
@@ -1028,6 +1216,9 @@ async def main():
 
     # Запускаем web сервер (для health check)
     await run_web_server()
+
+    # Запускаем систему напоминаний в отдельной задаче
+    asyncio.create_task(check_subscriptions_reminders(application.bot))
 
     # Запускаем бота
     async with application:
