@@ -616,11 +616,12 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
 
     order_id = f"POLI_{user.id}_{int(time.time())}"
 
+    # ИСПРАВЛЕНИЕ: передаем Фамилию и Имя в client_id вместо Telegram ID
     result = await paykeeper.create_invoice(
         order_id=order_id,
         amount=tariff_info['price'],
         client_email=email,
-        client_id=str(user.id),
+        client_id=fullname,  # <-- ИЗМЕНЕНО: теперь передаем Фамилию и Имя вместо str(user.id)
         service_name=f"Подписка POLINAFIT - {tariff_info['name']}"
     )
 
