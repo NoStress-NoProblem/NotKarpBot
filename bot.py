@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # === КОНСТАНТЫ ===
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinakaulkina")  # Никнейм админа для чека
 
 if not TOKEN:
     logger.error("Переменная BOT_TOKEN не задана!")
@@ -52,9 +53,10 @@ executor = ThreadPoolExecutor(max_workers=4)
 USER_STATES = {}
 start_time = time.time()
 
-# СТИКЕРЫ ДЛЯ НАПОМИНАНИЙ
+# СТИКЕРЫ
 STICKER_HELLO = "CAACAgIAAxkBAAENWKZnO-3P7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"  # Приветствие
 STICKER_HEART = "CAACAgIAAxkBAAENWKpnO-3QnJ7rX9vK7mHh8W2j4L5r9AACQAADr8ZRGmVJ_w7G1t9zNgQ"  # Красное сердце
+STICKER_WHITE_HEART = "CAACAgIAAxkBAAENWKxnO-3R7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"  # Белое сердце (замените на реальный)
 
 # === ОЧЕРЕДЬ СООБЩЕНИЙ С ЗАДЕРЖКОЙ 0.5 СЕК ===
 class MessageQueue:
@@ -63,7 +65,7 @@ class MessageQueue:
         self._processing = set()
         self._lock = asyncio.Lock()
         self._last_message_time = defaultdict(float)
-        self._rate_limit = 0.5
+        self._rate_limit = 0.5  # 0.5 секунды между сообщениями
 
     async def add(self, user_id: int, update: Update, context: ContextTypes.DEFAULT_TYPE, handler_func):
         async with self._lock:
@@ -100,6 +102,24 @@ class MessageQueue:
                     pass
 
 message_queue = MessageQueue()
+
+# === ГЛОБАЛЬНАЯ ЗАДЕРЖКА ДЛЯ ВСЕХ СООБЩЕНИЙ ===
+async def send_message_with_delay(bot, chat_id, text=None, photo=None, caption=None, reply_markup=None, sticker=None, parse_mode=None):
+    """Универсальная функция отправки сообщений с задержкой 0.5 сек"""
+    try:
+        if sticker:
+            await bot.send_sticker(chat_id=chat_id, sticker=sticker)
+            await asyncio.sleep(0.5)
+        
+        if photo:
+            await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
+            await asyncio.sleep(0.5)
+        elif text:
+            await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await asyncio.sleep(0.5)
+            
+    except Exception as e:
+        logger.error(f"Ошибка отправки сообщения: {e}")
 
 # === ФУНКЦИИ СОХРАНЕНИЯ ===
 def save_states():
@@ -179,7 +199,6 @@ def init_google_sheets():
         SHEET = CLIENT.open("Клиенты фитнес-бота").sheet1
 
         headers = SHEET.row_values(1)
-        # ОБНОВЛЕННЫЕ ЗАГОЛОВКИ
         expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Фамилия Имя", "Номер телефона", "Подписка до", "Статус", "ID платежа"]
 
         if not headers:
@@ -274,7 +293,6 @@ def is_valid_email(email: str) -> bool:
     return re.match(pattern, email) is not None
 
 def is_valid_phone(phone: str) -> bool:
-    # Простая валидация: только цифры, длина от 10 до 15 символов
     cleaned = re.sub(r'\D', '', phone)
     return len(cleaned) >= 10 and len(cleaned) <= 15
 
@@ -289,7 +307,6 @@ def get_main_menu_keyboard():
     ])
 
 def get_tariffs_keyboard():
-    # ДОБАВЛЕН ТАРИФ 3 ДНЯ ЗА 10 РУБЛЕЙ
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("3 дня (10 ₽)", callback_data='tariff_3')],
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
@@ -334,7 +351,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
-    # ДОБАВЛЕНО ПРЕДУПРЕЖДЕНИЕ О ЗАДЕРЖКЕ В НАЧАЛО СООБЩЕНИЯ
     caption = (
         "⚠️ Возможна задержка ответа до 1 минуты\n\n"
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
@@ -359,6 +375,7 @@ async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(desc)
+    await asyncio.sleep(0.5)
 
     features = (
         "Что входит в проект:\n\n"
@@ -382,6 +399,7 @@ async def project_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(features)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("Выбери, что хочешь узнать:", reply_markup=get_main_menu_keyboard())
 
 async def send_project_info(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
@@ -393,6 +411,7 @@ async def send_project_info(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     )
 
     await context.bot.send_message(chat_id=chat_id, text=desc)
+    await asyncio.sleep(0.5)
 
     features = (
         "Что входит в проект:\n\n"
@@ -416,6 +435,7 @@ async def send_project_info(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     )
 
     await context.bot.send_message(chat_id=chat_id, text=features)
+    await asyncio.sleep(0.5)
     await context.bot.send_message(chat_id=chat_id, text="Выбери, что хочешь узнать:", reply_markup=get_main_menu_keyboard())
 
 async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -495,12 +515,12 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, url in enumerate(review_photos[:5]):
         try:
             await context.bot.send_photo(chat_id=query.message.chat_id, photo=url)
-            if i < 4:
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
 
+    await asyncio.sleep(0.5)
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
@@ -524,12 +544,12 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, url in enumerate(review_photos[:5]):
         try:
             await update.message.reply_photo(photo=url)
-            if i < 4:
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Ошибка отправки отзыва {i+1}: {e}")
             continue
 
+    await asyncio.sleep(0.5)
     await update.message.reply_text(
         "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
         "Хочешь тоже так? Жми 👇",
@@ -541,7 +561,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
 
-    # ДОБАВЛЕН ТАРИФ 3 ДНЯ
     tariff_map = {
         'tariff_3': {'name': '3 дня (10 ₽)', 'price': 10, 'days': 3},
         'tariff_15': {'name': '15 дней (1990 ₽)', 'price': 1990, 'days': 15},
@@ -555,7 +574,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         return
 
     context.user_data['tariff'] = tariff_info
-    # ТЕПЕРЬ СНАЧАЛА СПРАШИВАЕМ ФАМИЛИЮ И ИМЯ
     context.user_data['payment_step'] = 'waiting_fullname'
 
     await context.bot.send_message(
@@ -567,7 +585,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
 async def handle_fullname_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fullname = update.message.text.strip()
     
-    # Простая валидация: должно быть минимум 2 слова
     if len(fullname.split()) < 2:
         await update.message.reply_text(
             "⚠️ Пожалуйста, введи Фамилию и Имя полностью (пример: Иванова Светлана):",
@@ -576,7 +593,6 @@ async def handle_fullname_input(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     context.user_data['fullname'] = fullname
-    # ТЕПЕРЬ СПРАШИВАЕМ НОМЕР ТЕЛЕФОНА
     context.user_data['payment_step'] = 'waiting_phone'
     
     await update.message.reply_text(
@@ -596,7 +612,6 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     context.user_data['phone'] = phone
-    # ТЕПЕРЬ СПРАШИВАЕМ EMAIL
     context.user_data['payment_step'] = 'waiting_email'
     
     await update.message.reply_text(
@@ -635,12 +650,11 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
 
     order_id = f"POLI_{user.id}_{int(time.time())}"
 
-    # ИСПРАВЛЕНИЕ: передаем Фамилию и Имя в client_id вместо Telegram ID
     result = await paykeeper.create_invoice(
         order_id=order_id,
         amount=tariff_info['price'],
         client_email=email,
-        client_id=fullname,  # <-- ИЗМЕНЕНО: теперь передаем Фамилию и Имя вместо str(user.id)
+        client_id=fullname,
         service_name=f"Подписка POLINAFIT - {tariff_info['name']}"
     )
 
@@ -751,30 +765,31 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
 
     save_states()
 
-    # ОБНОВЛЕННАЯ ЗАПИСЬ В GOOGLE SHEETS С НОВЫМИ СТОЛБЦАМИ
+    # Запись в Google Sheets
     if SHEET:
         try:
             row_data = [
-                str(user_id),                                    # ID
-                payment_info.get('username', ''),                # Username
-                '',                                             # Имя (пустое, т.к. теперь есть Фамилия Имя)
-                '',                                             # Рост
-                '',                                             # Вес
-                '',                                             # Калораж
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # Дата
-                payment_info['tariff'],                           # Тариф
-                payment_info['email'],                          # Email
-                payment_info.get('fullname', ''),              # Фамилия Имя
-                payment_info.get('phone', ''),                 # Номер телефона
-                paid_until,                                     # Подписка до
-                'ОПЛАЧЕНО',                                     # Статус
-                order_id                                        # ID платежа
+                str(user_id),
+                payment_info.get('username', ''),
+                '',
+                '',
+                '',
+                '',
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                payment_info['tariff'],
+                payment_info['email'],
+                payment_info.get('fullname', ''),
+                payment_info.get('phone', ''),
+                paid_until,
+                'ОПЛАЧЕНО',
+                order_id
             ]
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(executor, partial(SHEET.append_row, row_data))
         except Exception as e:
             logger.error(f"Ошибка сохранения в Google Sheets: {e}")
 
+    # Основное сообщение об успешной оплате
     success_text = (
         f"🎉 **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
         f"Тариф: {payment_info['tariff']}\n"
@@ -790,7 +805,26 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
         reply_markup=get_continue_keyboard()
     )
 
-    # ОБНОВЛЕННОЕ УВЕДОМЛЕНИЕ АДМИНУ С ПОЛНЫМИ ДАННЫМИ
+    # ДОБАВЛЕНО: Сообщение о чеке с задержкой
+    await asyncio.sleep(0.5)
+    
+    receipt_text = (
+        f"Если тебе не пришел чек, напиши мне @{ADMIN_USERNAME} и я тебе его отправлю в лс 🤍"
+    )
+    
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=receipt_text
+    )
+    
+    # Отправка стикера белого сердца с задержкой
+    await asyncio.sleep(0.5)
+    try:
+        await context.bot.send_sticker(chat_id=user_id, sticker=STICKER_WHITE_HEART)
+    except Exception as e:
+        logger.error(f"Ошибка отправки стикера белого сердца: {e}")
+
+    # Уведомление админу
     if ADMIN_ID:
         try:
             admin_text = (
@@ -837,6 +871,7 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await context.bot.send_message(chat_id=query.message.chat_id, text=instruction)
+    await asyncio.sleep(0.5)
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
@@ -852,7 +887,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
         'reviews': send_reviews,
-        'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),  # ДОБАВЛЕН ТАРИФ 3 ДНЯ
+        'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
@@ -871,7 +906,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     payment_step = context.user_data.get('payment_step')
 
-    # ОБРАБОТКА НОВЫХ ШАГОВ: ФАМИЛИЯ ИМЯ -> ТЕЛЕФОН -> EMAIL
     if payment_step == 'waiting_fullname':
         await handle_fullname_input(update, context)
         return
@@ -930,11 +964,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
 
 # === СИСТЕМА НАПОМИНАНИЙ О ПОДПИСКЕ ===
-REMINDERS_SENT = {}  # user_id -> datetime когда было отправлено напоминание
-EXPIRED_NOTIFICATIONS_SENT = {}  # user_id -> datetime когда было отправлено уведомление об окончании
-ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}  # user_id -> datetime когда было отправлено уведомление админу об окончании
-
-# Словарь для хранения данных пользователей перед удалением из PAID_USERS
+REMINDERS_SENT = {}
+EXPIRED_NOTIFICATIONS_SENT = {}
+ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}
 EXPIRED_USERS_DATA = {}
 
 async def check_subscriptions_reminders(bot):
@@ -946,59 +978,50 @@ async def check_subscriptions_reminders(bot):
             for user_id_str, user_data in list(PAID_USERS.items()):
                 try:
                     paid_until = datetime.datetime.strptime(user_data['paid_until'], '%Y-%m-%d')
-                    # Устанавливаем время окончания на конец дня (23:59:59)
                     paid_until_end = paid_until.replace(hour=23, minute=59, second=59)
                     
-                    # Напоминание за 1 день до окончания
+                    # Напоминание за 1 день
                     reminder_time = paid_until_end - datetime.timedelta(days=1)
-                    
-                    # Проверяем, нужно ли отправить напоминание (в течение часа от reminder_time)
                     time_diff = (now - reminder_time).total_seconds()
-                    if 0 <= time_diff <= 3600:  # В пределах часа после времени напоминания
+                    if 0 <= time_diff <= 3600:
                         if user_id_str not in REMINDERS_SENT:
                             await send_reminder(bot, int(user_id_str), user_data, paid_until)
                             REMINDERS_SENT[user_id_str] = now.isoformat()
                             save_states()
                     
-                    # Уведомление об окончании подписки (через 5 минут после окончания)
+                    # Уведомление через 5 минут после окончания
                     expiry_notification_time = paid_until_end + datetime.timedelta(minutes=5)
                     expiry_diff = (now - expiry_notification_time).total_seconds()
                     
-                    if expiry_diff >= 0 and expiry_diff <= 3600:  # В пределах часа после времени уведомления
+                    if expiry_diff >= 0 and expiry_diff <= 3600:
                         if user_id_str not in EXPIRED_NOTIFICATIONS_SENT:
-                            # Сохраняем данные пользователя перед удалением
                             EXPIRED_USERS_DATA[user_id_str] = user_data.copy()
                             
-                            # Проверяем, не продлил ли пользователь подписку
                             if user_id_str not in PAID_USERS or PAID_USERS[user_id_str]['paid_until'] == user_data['paid_until']:
                                 await send_expiry_notification(bot, int(user_id_str), user_data)
                                 EXPIRED_NOTIFICATIONS_SENT[user_id_str] = now.isoformat()
                                 save_states()
-                                # Удаляем из активных подписчиков
                                 if user_id_str in PAID_USERS:
                                     del PAID_USERS[user_id_str]
                                     save_states()
                     
-                    # Уведомление админу через 7 минут после окончания подписки
+                    # Уведомление админу через 7 минут
                     admin_notification_time = paid_until_end + datetime.timedelta(minutes=7)
                     admin_diff = (now - admin_notification_time).total_seconds()
                     
-                    if admin_diff >= 0 and admin_diff <= 3600:  # В пределах часа после времени уведомления
+                    if admin_diff >= 0 and admin_diff <= 3600:
                         if user_id_str not in ADMIN_EXPIRY_NOTIFICATIONS_SENT:
-                            # Проверяем, не продлил ли пользователь подписку
                             current_data = PAID_USERS.get(user_id_str)
                             is_expired = True
                             
                             if current_data and current_data['paid_until'] != user_data['paid_until']:
-                                is_expired = False  # Пользователь продлил подписку
+                                is_expired = False
                             
                             if is_expired:
-                                # Берем данные из сохраненных или текущих
                                 notify_data = EXPIRED_USERS_DATA.get(user_id_str, user_data)
                                 await send_admin_expiry_notification(bot, int(user_id_str), notify_data)
                                 ADMIN_EXPIRY_NOTIFICATIONS_SENT[user_id_str] = now.isoformat()
                                 save_states()
-                                # Удаляем из сохраненных данных
                                 if user_id_str in EXPIRED_USERS_DATA:
                                     del EXPIRED_USERS_DATA[user_id_str]
                     
@@ -1006,7 +1029,6 @@ async def check_subscriptions_reminders(bot):
                     logger.error(f"Ошибка проверки подписки для {user_id_str}: {e}")
                     continue
             
-            # Проверяем каждые 5 минут
             await asyncio.sleep(300)
             
         except Exception as e:
@@ -1016,10 +1038,9 @@ async def check_subscriptions_reminders(bot):
 async def send_reminder(bot, user_id: int, user_data: dict, paid_until: datetime.datetime):
     """Отправка напоминания за 1 день до окончания подписки"""
     try:
-        # Отправляем стикер приветствия
         await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
+        await asyncio.sleep(0.5)
         
-        # Форматируем дату и время окончания
         expiry_datetime = paid_until.strftime('%d.%m.%Y в 23:59')
         
         message = (
@@ -1042,8 +1063,8 @@ async def send_reminder(bot, user_id: int, user_data: dict, paid_until: datetime
 async def send_expiry_notification(bot, user_id: int, user_data: dict):
     """Отправка уведомления об окончании подписки"""
     try:
-        # Отправляем стикер приветствия
         await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
+        await asyncio.sleep(0.5)
         
         message = (
             f"Привет, подружка! 👋\n\n"
@@ -1056,8 +1077,8 @@ async def send_expiry_notification(bot, user_id: int, user_data: dict):
             text=message,
             reply_markup=get_renew_keyboard()
         )
+        await asyncio.sleep(0.5)
         
-        # Отправляем стикер сердца
         await bot.send_sticker(chat_id=user_id, sticker=STICKER_HEART)
         
         logger.info(f"Отправлено уведомление об окончании подписки пользователю {user_id}")
@@ -1094,11 +1115,9 @@ async def send_admin_expiry_notification(bot, user_id: int, user_data: dict):
 
 # === AIOHTTP WEB SERVER С HEALTH CHECK ===
 async def health_handler(request):
-    """Health check endpoint для Render"""
     return web.Response(text="OK", status=200)
 
 async def webhook_handler(request):
-    """Обработчик webhook от Telegram"""
     try:
         data = await request.json()
         update = Update.de_json(data, application.bot)
@@ -1109,7 +1128,6 @@ async def webhook_handler(request):
         return web.Response(status=500)
 
 async def paykeeper_webhook_handler(request):
-    """Обработчик webhook от PayKeeper"""
     try:
         data = await request.post()
 
@@ -1146,7 +1164,6 @@ async def paykeeper_webhook_handler(request):
         return web.Response(status=500)
 
 async def run_web_server():
-    """Запуск aiohttp сервера с health check"""
     app = web.Application()
     app.router.add_get('/health', health_handler)
     app.router.add_post(f'/{TOKEN}', webhook_handler)
@@ -1214,13 +1231,9 @@ async def main():
         BotCommand("stats", "Статистика (админ)")
     ])
 
-    # Запускаем web сервер (для health check)
     await run_web_server()
-
-    # Запускаем систему напоминаний в отдельной задаче
     asyncio.create_task(check_subscriptions_reminders(application.bot))
 
-    # Запускаем бота
     async with application:
         await application.start()
 
