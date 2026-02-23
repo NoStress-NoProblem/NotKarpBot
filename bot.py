@@ -536,7 +536,8 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await asyncio.sleep(0.5)
     await update.message.reply_text(
-        "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
+        "Ты только посмотри на отзывы моих девочек 🥹\n"
+        "А это всего один месяц работы! ВАУ!!!\n"
         "Хочешь тоже так? Жми 👇",
         reply_markup=get_reviews_keyboard()
     )
@@ -921,24 +922,12 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
         "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky \n"
         "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy  \n"
-        "3️⃣ Нажми на закреплённое сообщение «НАВИГАЦИЯ»\n"
+        "3️⃣ Нажми в канале на закрепленное  сообщение «НАВИГАЦИЯ»\n"
         "4️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
         "5️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
         "6️⃣ Заполни анкету подробно и отправь мне\n"
         "7️⃣ Вернись в закрытый канал и изучай материалы последовательно (сверху вниз)\n\n"
         "❗️В навигации также есть кнопки для отчётов по питанию и форме — они тебе понадобятся регулярно.\n\n"
-        "ЕСЛИ ТЫ ВСЁ ПОНЯЛА, НАЖМИ «ПРОДОЛЖИТЬ» 👇"
-    )
-
-    await context.bot.send_message(chat_id=query.message.chat_id, text=instruction)
-    await asyncio.sleep(0.5)
-
-    # УДАЛЕНО: Дублирующее сообщение о вступлении в группу
-    # Теперь отправляем только кнопку продолжения без лишнего текста
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Готова начать? 👇",
-        reply_markup=get_continue_keyboard()
     )
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -987,8 +976,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/project': project_command,
         '/tariffs': tariffs_command,
         '/reviews': reviews_command,
-        '/subscription': subscription_command,  # ИЗМЕНЕНО: Добавлена новая команда
-        '/connection': connection_command       # ИЗМЕНЕНО: Добавлена новая команда
+        '/subscription': subscription_command,  
+        '/connection': connection_command       
     }
 
     if text in command_map:
