@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # === КОНСТАНТЫ ===
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinakaulkina")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinanekarpovaa")  # ИЗМЕНЕНО на @polinanekarpovaa
 
 if not TOKEN:
     logger.error("Переменная BOT_TOKEN не задана!")
@@ -285,7 +285,9 @@ def get_start_keyboard():
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
-        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')]
+        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')],
+        [InlineKeyboardButton("Подписка 📅", callback_data='my_subscription')],
+        [InlineKeyboardButton("Связь со мной 💬", callback_data='contact_me')]
     ])
 
 def get_tariffs_keyboard():
@@ -315,6 +317,9 @@ def get_cancel_keyboard():
 def get_renew_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Продлить подписку 💰", callback_data='tariffs')]])
 
+def get_back_to_menu_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Вернуться в меню", callback_data='main_menu')]])
+
 # === ОБРАБОТЧИКИ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -333,7 +338,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
-    # УДАЛЕНО ПРЕДУПРЕЖДЕНИЕ О ЗАДЕРЖКЕ
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
@@ -538,6 +542,90 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_reviews_keyboard()
     )
 
+# === НОВЫЕ ФУНКЦИИ: ПОДПИСКА И СВЯЗЬ ===
+async def send_my_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает информацию о текущей подписке пользователя"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = str(query.from_user.id)
+    
+    if user_id in PAID_USERS:
+        user_data = PAID_USERS[user_id]
+        tariff = user_data.get('tariff', 'Неизвестен')
+        paid_until = user_data.get('paid_until', 'Неизвестно')
+        
+        # Вычисляем сколько дней осталось
+        try:
+            expiry_date = datetime.datetime.strptime(paid_until, '%Y-%m-%d')
+            today = datetime.datetime.now()
+            days_left = (expiry_date - today).days
+            
+            if days_left < 0:
+                days_text = "❌ Подписка истекла"
+            elif days_left == 0:
+                days_text = "⏳ Истекает сегодня"
+            else:
+                days_text = f"⏳ Осталось дней: {days_left}"
+            
+            message = (
+                f"📅 Информация о вашей подписке:\n\n"
+                f"Тариф: {tariff}\n"
+                f"Действует до: {paid_until}\n"
+                f"{days_text}\n\n"
+                f"Хочешь продлить подписку? 👇"
+            )
+            
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=message,
+                reply_markup=get_renew_keyboard()
+            )
+        except Exception as e:
+            logger.error(f"Ошибка вычисления дней подписки: {e}")
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"📅 Ваша подписка:\n\nТариф: {tariff}\nДействует до: {paid_until}",
+                reply_markup=get_renew_keyboard()
+            )
+    else:
+        message = (
+            f"📅 У вас нет активной подписки.\n\n"
+            f"Хотите оформить подписку и присоединиться к проекту POLINAFIT? 💪"
+        )
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=message,
+            reply_markup=get_tariffs_keyboard()
+        )
+
+async def send_contact_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет информацию для связи с админом"""
+    query = update.callback_query
+    await query.answer()
+    
+    message = (
+        f"Это ссылка на мой ТГ @{ADMIN_USERNAME} 💬\n\n"
+        f"Можешь задать мне любой вопрос, с радостью на него отвечу! 🤍"
+    )
+    
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=message,
+        reply_markup=get_back_to_menu_keyboard()
+    )
+
+async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Возвращает в главное меню"""
+    query = update.callback_query
+    await query.answer()
+    
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Главное меню:",
+        reply_markup=get_main_menu_keyboard()
+    )
+
 # === PAYKEEPER ОБРАБОТЧИКИ ===
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     query = update.callback_query
@@ -622,7 +710,7 @@ async def create_paykeeper_payment(update: Update, context: ContextTypes.DEFAULT
 
     if not paykeeper:
         await update.message.reply_text(
-            "⚠️ Система оплаты временно недоступна.\nПожалуйста, свяжитесь с администратором @polinakaulkina",
+            "⚠️ Система оплаты временно недоступна.\nПожалуйста, свяжитесь с @polinanekarpovaa",
             reply_markup=get_start_keyboard()
         )
         return
@@ -721,7 +809,7 @@ async def check_payment_status_handler(update: Update, context: ContextTypes.DEF
             f"⏳ **Статус: Ожидание оплаты**\n\n"
             f"Платеж еще не поступил.\n"
             f"Если вы уже оплатили, подождите 1-2 минуты и проверьте снова.\n\n"
-            f"Если возникли проблемы, напишите @polinakaulkina",
+            f"Если возникли проблемы, напишите @polinanekarpovaa",
             parse_mode="Markdown",
             reply_markup=get_payment_keyboard(payment_info['payment_link'])
         )
@@ -837,10 +925,10 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
         "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
-        "1️⃣ Зайди в закрытый канал с материалами проекта: @recipes_group\n"
+        "1️⃣ Зайди в закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy\n"
         "2️⃣ Нажми на закреплённое сообщение «НАВИГАЦИЯ»\n"
         "3️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
-        "4️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinakaulkina)\n"
+        "4️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
         "5️⃣ Заполни анкету подробно и отправь мне\n"
         "6️⃣ Вернись в закрытый канал и изучай материалы последовательно (сверху вниз)\n\n"
         "❗️В навигации также есть кнопки для отчётов по питанию и форме — они тебе понадобятся регулярно.\n\n"
@@ -852,7 +940,7 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 @recipes_group",
+        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 https://t.me/+Jbb_WAbbePM2Mzky",
         reply_markup=get_continue_keyboard()
     )
 
@@ -864,6 +952,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
         'reviews': send_reviews,
+        'my_subscription': send_my_subscription,
+        'contact_me': send_contact_info,
+        'main_menu': send_main_menu,
         'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
