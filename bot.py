@@ -10,6 +10,7 @@ import tempfile
 import atexit
 import queue
 import base64
+import psycopg2
 from functools import partial
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +42,9 @@ if ADMIN_ID == 0:
 PORT = int(os.environ.get("PORT", "10000"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
+# === POSTGRESQL НАСТРОЙКИ ===
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 # === PAYKEEPER НАСТРОЙКИ ===
 PAYKEEPER_SERVER = os.getenv("PAYKEEPER_SERVER", "")
 PAYKEEPER_USER = os.getenv("PAYKEEPER_USER", "")
@@ -57,6 +61,153 @@ start_time = time.time()
 STICKER_HELLO = "CAACAgIAAxkBAAENWKZnO-3P7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"
 STICKER_HEART = "CAACAgIAAxkBAAENWKpnO-3QnJ7rX9vK7mHh8W2j4L5r9AACQAADr8ZRGmVJ_w7G1t9zNgQ"
 STICKER_WHITE_HEART = "CAACAgIAAxkBAAENWKxnO-3R7h2j3Zz_8dXlKz7Y8F1a9QACPgADr8ZRGrCDrWfHn9g2NgQ"
+
+# === POSTGRESQL ФУНКЦИИ ===
+def get_db_connection():
+    """Создает подключение к PostgreSQL"""
+    if not DATABASE_URL:
+        return None
+    try:
+        return psycopg2.connect(DATABASE_URL)
+    except Exception as e:
+        logger.error(f"Ошибка подключения к БД: {e}")
+        return None
+
+def init_db():
+    """Инициализирует таблицы в PostgreSQL"""
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL не настроен, используется файловое хранилище")
+        return False
+    
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            # Таблица для основного состояния бота
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_data (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            
+            # Таблица для платежей (для удобства аналитики)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS payments_log (
+                    id SERIAL PRIMARY KEY,
+                    order_id TEXT UNIQUE,
+                    user_id BIGINT,
+                    username TEXT,
+                    fullname TEXT,
+                    phone TEXT,
+                    email TEXT,
+                    tariff TEXT,
+                    amount INTEGER,
+                    days INTEGER,
+                    status TEXT,
+                    created_at TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    invoice_id TEXT
+                )
+            """)
+            
+            conn.commit()
+            logger.info("✅ Таблицы PostgreSQL созданы/проверены")
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка инициализации БД: {e}")
+        return False
+    finally:
+        conn.close()
+
+def save_states():
+    """Сохраняет состояния в PostgreSQL или файл"""
+    data = {
+        'user_states': USER_STATES, 
+        'payments': PAYMENTS, 
+        'paid_users': PAID_USERS,
+        'reminders_sent': REMINDERS_SENT,
+        'expired_notifications_sent': EXPIRED_NOTIFICATIONS_SENT,
+        'admin_expiry_notifications_sent': ADMIN_EXPIRY_NOTIFICATIONS_SENT
+    }
+    
+    # Пробуем сохранить в PostgreSQL
+    if DATABASE_URL:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO bot_data (key, value) 
+                        VALUES ('bot_state', %s)
+                        ON CONFLICT (key) DO UPDATE 
+                        SET value = EXCLUDED.value, updated_at = NOW()
+                    """, (json.dumps(data, ensure_ascii=False, default=str),))
+                    conn.commit()
+                conn.close()
+                logger.debug(f"Сохранено в БД: {len(PAID_USERS)} подписок")
+                return
+        except Exception as e:
+            logger.error(f"Ошибка сохранения в БД: {e}")
+    
+    # Fallback на файл
+    try:
+        with open('user_states.json', 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        logger.debug(f"Сохранено в файл: {len(PAID_USERS)} подписок")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения в файл: {e}")
+
+def load_states():
+    """Загружает состояния из PostgreSQL или файла"""
+    global USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT
+    
+    # Сначала пробуем загрузить из PostgreSQL
+    if DATABASE_URL:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT value FROM bot_data WHERE key = 'bot_state'")
+                    row = cur.fetchone()
+                    if row:
+                        data = json.loads(row[0])
+                        USER_STATES = data.get('user_states', {})
+                        PAYMENTS = data.get('payments', {})
+                        PAID_USERS = data.get('paid_users', {})
+                        REMINDERS_SENT = data.get('reminders_sent', {})
+                        EXPIRED_NOTIFICATIONS_SENT = data.get('expired_notifications_sent', {})
+                        ADMIN_EXPIRY_NOTIFICATIONS_SENT = data.get('admin_expiry_notifications_sent', {})
+                        logger.info(f"✅ Загружено из БД: {len(PAID_USERS)} подписок, {len(PAYMENTS)} платежей")
+                        conn.close()
+                        return
+                conn.close()
+        except Exception as e:
+            logger.error(f"Ошибка загрузки из БД: {e}")
+    
+    # Fallback на файл
+    if os.path.exists('user_states.json'):
+        try:
+            with open('user_states.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            USER_STATES = data.get('user_states', {})
+            PAYMENTS = data.get('payments', {})
+            PAID_USERS = data.get('paid_users', {})
+            REMINDERS_SENT = data.get('reminders_sent', {})
+            EXPIRED_NOTIFICATIONS_SENT = data.get('expired_notifications_sent', {})
+            ADMIN_EXPIRY_NOTIFICATIONS_SENT = data.get('admin_expiry_notifications_sent', {})
+            logger.info(f"✅ Загружено из файла: {len(PAID_USERS)} подписок, {len(PAYMENTS)} платежей")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки из файла: {e}")
+            USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
+            REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}
+    else:
+        logger.info("Файл состояний не найден, начинаем с чистого листа")
+        USER_STATES, PAYMENTS, PAID_USERS = {}, {}, {}
+        REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}
 
 # === ОЧЕРЕДЬ СООБЩЕНИЙ С ЗАДЕРЖКОЙ 0.5 СЕК ===
 class MessageQueue:
@@ -103,42 +254,6 @@ class MessageQueue:
 
 message_queue = MessageQueue()
 
-# === ФУНКЦИИ СОХРАНЕНИЯ ===
-def save_states():
-    try:
-        data = {
-            'user_states': USER_STATES, 
-            'payments': PAYMENTS, 
-            'paid_users': PAID_USERS,
-            'reminders_sent': REMINDERS_SENT,
-            'expired_notifications_sent': EXPIRED_NOTIFICATIONS_SENT,
-            'admin_expiry_notifications_sent': ADMIN_EXPIRY_NOTIFICATIONS_SENT
-        }
-        with open('user_states.json', 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-        logger.debug(f"Сохранено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
-    except Exception as e:
-        logger.error(f"Ошибка сохранения состояний: {e}")
-
-def load_states():
-    global USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT
-    if os.path.exists('user_states.json'):
-        try:
-            with open('user_states.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            USER_STATES = data.get('user_states', {})
-            PAYMENTS = data.get('payments', {})
-            PAID_USERS = data.get('paid_users', {})
-            REMINDERS_SENT = data.get('reminders_sent', {})
-            EXPIRED_NOTIFICATIONS_SENT = data.get('expired_notifications_sent', {})
-            ADMIN_EXPIRY_NOTIFICATIONS_SENT = data.get('admin_expiry_notifications_sent', {})
-            logger.info(f"Загружено {len(USER_STATES)} состояний, {len(PAYMENTS)} платежей")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки состояний: {e}")
-            USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}, {}, {}, {}
-    else:
-        USER_STATES, PAYMENTS, PAID_USERS, REMINDERS_SENT, EXPIRED_NOTIFICATIONS_SENT, ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}, {}, {}, {}, {}, {}
-
 # === GOOGLE SHEETS ===
 def init_google_sheets():
     try:
@@ -171,9 +286,9 @@ def init_google_sheets():
             creds_file = google_creds_json
 
         SCOPE = [
-            "https://spreadsheets.google.com/feeds ",
-            "https://www.googleapis.com/auth/drive ",
-            "https://www.googleapis.com/auth/spreadsheets "
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets"
         ]
 
         CREDS = ServiceAccountCredentials.from_json_keyfile_name(creds_file, SCOPE)
@@ -334,7 +449,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg "
+    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
@@ -425,7 +540,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -457,7 +572,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -484,15 +599,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -513,15 +628,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -827,7 +942,7 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
                 '',
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 payment_info['tariff'],
-                str(payment_info['amount']),  # <-- Цена добавлена здесь
+                str(payment_info['amount']),
                 payment_info['email'],
                 payment_info.get('fullname', ''),
                 payment_info.get('phone', ''),
@@ -907,9 +1022,9 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
         "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
-        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky   \n"
-        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy    \n"
-        "3️⃣ Нажми в канале на закрепленное  сообщение «НАВИГАЦИЯ»\n"
+        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky\n"
+        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy\n"
+        "3️⃣ Нажми в канале на закрепленное сообщение «НАВИГАЦИЯ»\n"
         "4️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
         "5️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
         "6️⃣ Заполни анкету подробно и отправь мне\n"
@@ -917,7 +1032,6 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❗️В навигации также есть кнопки для отчётов по питанию и форме — они тебе понадобятся регулярно.\n\n"
     )
 
-    # Отправляем только инструкцию без кнопки и без дополнительных сообщений
     await context.bot.send_message(chat_id=query.message.chat_id, text=instruction)
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1208,7 +1322,6 @@ async def run_web_server():
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     logger.info(f"✅ Web сервер запущен на порту {PORT}")
-    logger.info(f"✅ Health check: http://0.0.0.0: {PORT}/health")
 
 async def queued_start(update, context):
     await message_queue.add(update.effective_user.id, update, context, start)
@@ -1242,10 +1355,13 @@ application = None
 async def main():
     global application
 
+    # Инициализируем БД перед загрузкой состояний
+    init_db()
     load_states()
 
     logger.info("=" * 60)
-    logger.info("🤖 POLINAFIT Bot с Health Check и PayKeeper")
+    logger.info("🤖 POLINAFIT Bot с PostgreSQL")
+    logger.info(f"Database: {'✅' if DATABASE_URL else '❌'}")
     logger.info(f"PayKeeper: {'✅' if paykeeper else '❌'} {PAYKEEPER_SERVER}")
     logger.info("=" * 60)
 
