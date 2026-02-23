@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # === КОНСТАНТЫ ===
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinanekarpovaa")  # ИЗМЕНЕНО на @polinanekarpovaa
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "polinanekarpovaa")
 
 if not TOKEN:
     logger.error("Переменная BOT_TOKEN не задана!")
@@ -282,7 +282,6 @@ def is_valid_phone(phone: str) -> bool:
 def get_start_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Хочу в проект 💪", callback_data='want_project')]])
 
-# ИЗМЕНЕНО: Убраны кнопки "Подписка" и "Связь со мной"
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
@@ -536,16 +535,12 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await asyncio.sleep(0.5)
     await update.message.reply_text(
-        "Ты только посмотри на отзывы моих девочек 🥹\n"
-        "А это всего один месяц работы! ВАУ!!!\n"
+        "Ты только посмотри на отзывы моих девочек 🥹 А это всего один месяц работы! ВАУ!!!\n"
         "Хочешь тоже так? Жми 👇",
         reply_markup=get_reviews_keyboard()
     )
 
-# === НОВЫЕ ФУНКЦИИ: ПОДПИСКА И СВЯЗЬ ===
-# ИЗМЕНЕНО: Теперь это команда, а не кнопка
 async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает информацию о текущей подписке пользователя (команда /subscription)"""
     user_id = str(update.effective_user.id)
     
     if user_id in PAID_USERS:
@@ -553,7 +548,6 @@ async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYP
         tariff = user_data.get('tariff', 'Неизвестен')
         paid_until = user_data.get('paid_until', 'Неизвестно')
         
-        # Вычисляем сколько дней осталось
         try:
             expiry_date = datetime.datetime.strptime(paid_until, '%Y-%m-%d')
             today = datetime.datetime.now()
@@ -594,9 +588,7 @@ async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=get_tariffs_keyboard()
         )
 
-# ИЗМЕНЕНО: Теперь это команда, а не кнопка
 async def connection_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет информацию для связи с админом (команда /connection)"""
     message = (
         f"Это ссылка на мой ТГ @{ADMIN_USERNAME} 💬\n\n"
         f"Можешь задать мне любой вопрос, с радостью на него отвечу! 🤍"
@@ -607,11 +599,7 @@ async def connection_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=get_back_to_menu_keyboard()
     )
 
-# Удалена функция send_my_subscription (заменена на subscription_command)
-# Удалена функция send_contact_info (заменена на connection_command)
-
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Возвращает в главное меню"""
     query = update.callback_query
     await query.answer()
     
@@ -621,7 +609,6 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_menu_keyboard()
     )
 
-# === PAYKEEPER ОБРАБОТЧИКИ ===
 async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_data: str):
     query = update.callback_query
     await query.answer()
@@ -920,8 +907,8 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
         "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
-        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky \n"
-        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy  \n"
+        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky  \n"
+        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy   \n"
         "3️⃣ Нажми на закреплённое сообщение «НАВИГАЦИЯ»\n"
         "4️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
         "5️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
@@ -931,16 +918,8 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ЕСЛИ ТЫ ВСЁ ПОНЯЛА, НАЖМИ «ПРОДОЛЖИТЬ» 👇"
     )
 
+    # Отправляем только инструкцию без кнопки и без дополнительных сообщений
     await context.bot.send_message(chat_id=query.message.chat_id, text=instruction)
-    await asyncio.sleep(0.5)
-
-    # УДАЛЕНО: Дублирующее сообщение о вступлении в группу
-    # Теперь отправляем только кнопку продолжения без лишнего текста
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Готова начать? 👇",
-        reply_markup=get_continue_keyboard()
-    )
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -950,7 +929,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
         'reviews': send_reviews,
-        # ИЗМЕНЕНО: Убраны обработчики 'my_subscription' и 'contact_me' (теперь команды)
         'main_menu': send_main_menu,
         'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
@@ -988,8 +966,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/project': project_command,
         '/tariffs': tariffs_command,
         '/reviews': reviews_command,
-        '/subscription': subscription_command,  # ИЗМЕНЕНО: Добавлена новая команда
-        '/connection': connection_command       # ИЗМЕНЕНО: Добавлена новая команда
+        '/subscription': subscription_command,
+        '/connection': connection_command
     }
 
     if text in command_map:
@@ -1030,14 +1008,12 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
 
-# === СИСТЕМА НАПОМИНАНИЙ О ПОДПИСКЕ ===
 REMINDERS_SENT = {}
 EXPIRED_NOTIFICATIONS_SENT = {}
 ADMIN_EXPIRY_NOTIFICATIONS_SENT = {}
 EXPIRED_USERS_DATA = {}
 
 async def check_subscriptions_reminders(bot):
-    """Проверка и отправка напоминаний о подписке"""
     while True:
         try:
             now = datetime.datetime.now()
@@ -1100,7 +1076,6 @@ async def check_subscriptions_reminders(bot):
             await asyncio.sleep(300)
 
 async def send_reminder(bot, user_id: int, user_data: dict, paid_until: datetime.datetime):
-    """Отправка напоминания за 1 день до окончания подписки"""
     try:
         await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
         await asyncio.sleep(0.5)
@@ -1125,7 +1100,6 @@ async def send_reminder(bot, user_id: int, user_data: dict, paid_until: datetime
         logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
 
 async def send_expiry_notification(bot, user_id: int, user_data: dict):
-    """Отправка уведомления об окончании подписки"""
     try:
         await bot.send_sticker(chat_id=user_id, sticker=STICKER_HELLO)
         await asyncio.sleep(0.5)
@@ -1151,7 +1125,6 @@ async def send_expiry_notification(bot, user_id: int, user_data: dict):
         logger.error(f"Ошибка отправки уведомления об окончании пользователю {user_id}: {e}")
 
 async def send_admin_expiry_notification(bot, user_id: int, user_data: dict):
-    """Отправка уведомления админу о непродленной подписке"""
     try:
         if not ADMIN_ID:
             logger.warning("ADMIN_ID не настроен, уведомление админу не отправлено")
@@ -1177,7 +1150,6 @@ async def send_admin_expiry_notification(bot, user_id: int, user_data: dict):
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления админу о непродленной подписке: {e}")
 
-# === AIOHTTP WEB SERVER С HEALTH CHECK ===
 async def health_handler(request):
     return web.Response(text="OK", status=200)
 
@@ -1240,7 +1212,6 @@ async def run_web_server():
     logger.info(f"✅ Web сервер запущен на порту {PORT}")
     logger.info(f"✅ Health check: http://0.0.0.0:{PORT}/health")
 
-# === WRAPPERS ===
 async def queued_start(update, context):
     await message_queue.add(update.effective_user.id, update, context, start)
 
@@ -1253,7 +1224,6 @@ async def queued_tariffs(update, context):
 async def queued_reviews(update, context):
     await message_queue.add(update.effective_user.id, update, context, reviews_command)
 
-# ИЗМЕНЕНО: Добавлены wrapper'ы для новых команд
 async def queued_subscription(update, context):
     await message_queue.add(update.effective_user.id, update, context, subscription_command)
 
@@ -1269,10 +1239,8 @@ async def queued_callback(update, context):
 async def queued_message(update, context):
     await message_queue.add(update.effective_user.id, update, context, handle_message)
 
-# === ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ===
 application = None
 
-# === ЗАПУСК ===
 async def main():
     global application
 
@@ -1289,7 +1257,6 @@ async def main():
     application.add_handler(CommandHandler("project", queued_project))
     application.add_handler(CommandHandler("tariffs", queued_tariffs))
     application.add_handler(CommandHandler("reviews", queued_reviews))
-    # ИЗМЕНЕНО: Добавлены обработчики новых команд
     application.add_handler(CommandHandler("subscription", queued_subscription))
     application.add_handler(CommandHandler("connection", queued_connection))
     application.add_handler(CommandHandler("stats", queued_stats))
@@ -1297,14 +1264,13 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, queued_message))
     application.add_error_handler(error_handler)
 
-    # ИЗМЕНЕНО: Обновлено меню команд (добавлены subscription и connection, убраны из кнопок)
     await application.bot.set_my_commands([
         BotCommand("start", "Начать работу"),
         BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Тарифы"),
         BotCommand("reviews", "Отзывы"),
-        BotCommand("subscription", "Подписка"),      # НОВАЯ КОМАНДА
-        BotCommand("connection", "Связь со мной"),   # НОВАЯ КОМАНДА
+        BotCommand("subscription", "Подписка"),
+        BotCommand("connection", "Связь со мной"),
         BotCommand("stats", "Статистика (админ)")
     ])
 
