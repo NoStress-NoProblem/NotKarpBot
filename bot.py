@@ -171,9 +171,9 @@ def init_google_sheets():
             creds_file = google_creds_json
 
         SCOPE = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-            "https://www.googleapis.com/auth/spreadsheets"
+            "https://spreadsheets.google.com/feeds ",
+            "https://www.googleapis.com/auth/drive ",
+            "https://www.googleapis.com/auth/spreadsheets "
         ]
 
         CREDS = ServiceAccountCredentials.from_json_keyfile_name(creds_file, SCOPE)
@@ -282,12 +282,11 @@ def is_valid_phone(phone: str) -> bool:
 def get_start_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Хочу в проект 💪", callback_data='want_project')]])
 
+# ИЗМЕНЕНО: Убраны кнопки "Подписка" и "Связь со мной"
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Тарифы 💰", callback_data='tariffs')],
-        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')],
-        [InlineKeyboardButton("Подписка 📅", callback_data='my_subscription')],
-        [InlineKeyboardButton("Связь со мной 💬", callback_data='contact_me')]
+        [InlineKeyboardButton("Отзывы 🥹", callback_data='reviews')]
     ])
 
 def get_tariffs_keyboard():
@@ -337,7 +336,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
+    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg "
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
@@ -428,7 +427,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -460,7 +459,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -487,15 +486,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -516,15 +515,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -543,12 +542,10 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # === НОВЫЕ ФУНКЦИИ: ПОДПИСКА И СВЯЗЬ ===
-async def send_my_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает информацию о текущей подписке пользователя"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = str(query.from_user.id)
+# ИЗМЕНЕНО: Теперь это команда, а не кнопка
+async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает информацию о текущей подписке пользователя (команда /subscription)"""
+    user_id = str(update.effective_user.id)
     
     if user_id in PAID_USERS:
         user_data = PAID_USERS[user_id]
@@ -576,15 +573,13 @@ async def send_my_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"Хочешь продлить подписку? 👇"
             )
             
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
+            await update.message.reply_text(
                 text=message,
                 reply_markup=get_renew_keyboard()
             )
         except Exception as e:
             logger.error(f"Ошибка вычисления дней подписки: {e}")
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
+            await update.message.reply_text(
                 text=f"📅 Ваша подписка:\n\nТариф: {tariff}\nДействует до: {paid_until}",
                 reply_markup=get_renew_keyboard()
             )
@@ -593,27 +588,26 @@ async def send_my_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
             f"📅 У вас нет активной подписки.\n\n"
             f"Хотите оформить подписку и присоединиться к проекту POLINAFIT? 💪"
         )
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
+        await update.message.reply_text(
             text=message,
             reply_markup=get_tariffs_keyboard()
         )
 
-async def send_contact_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет информацию для связи с админом"""
-    query = update.callback_query
-    await query.answer()
-    
+# ИЗМЕНЕНО: Теперь это команда, а не кнопка
+async def connection_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет информацию для связи с админом (команда /connection)"""
     message = (
         f"Это ссылка на мой ТГ @{ADMIN_USERNAME} 💬\n\n"
         f"Можешь задать мне любой вопрос, с радостью на него отвечу! 🤍"
     )
     
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    await update.message.reply_text(
         text=message,
         reply_markup=get_back_to_menu_keyboard()
     )
+
+# Удалена функция send_my_subscription (заменена на subscription_command)
+# Удалена функция send_contact_info (заменена на connection_command)
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Возвращает в главное меню"""
@@ -925,7 +919,7 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
         "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
-        "1️⃣ Зайди в закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy\n"
+        "1️⃣ Зайди в закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy \n"
         "2️⃣ Нажми на закреплённое сообщение «НАВИГАЦИЯ»\n"
         "3️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
         "4️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
@@ -940,7 +934,7 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 https://t.me/+Jbb_WAbbePM2Mzky",
+        text="Вступай в закрытую группу со всей информацией 🫶🏻\n👉 https://t.me/+Jbb_WAbbePM2Mzky ",
         reply_markup=get_continue_keyboard()
     )
 
@@ -952,8 +946,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'want_project': lambda u, c: send_project_info(c, query.message.chat_id),
         'tariffs': send_tariffs,
         'reviews': send_reviews,
-        'my_subscription': send_my_subscription,
-        'contact_me': send_contact_info,
+        # ИЗМЕНЕНО: Убраны обработчики 'my_subscription' и 'contact_me' (теперь команды)
         'main_menu': send_main_menu,
         'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
@@ -990,7 +983,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/start': start,
         '/project': project_command,
         '/tariffs': tariffs_command,
-        '/reviews': reviews_command
+        '/reviews': reviews_command,
+        '/subscription': subscription_command,  # ИЗМЕНЕНО: Добавлена новая команда
+        '/connection': connection_command       # ИЗМЕНЕНО: Добавлена новая команда
     }
 
     if text in command_map:
@@ -1239,7 +1234,7 @@ async def run_web_server():
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     logger.info(f"✅ Web сервер запущен на порту {PORT}")
-    logger.info(f"✅ Health check: http://0.0.0.0:{PORT}/health")
+    logger.info(f"✅ Health check: http://0.0.0.0: {PORT}/health")
 
 # === WRAPPERS ===
 async def queued_start(update, context):
@@ -1253,6 +1248,13 @@ async def queued_tariffs(update, context):
 
 async def queued_reviews(update, context):
     await message_queue.add(update.effective_user.id, update, context, reviews_command)
+
+# ИЗМЕНЕНО: Добавлены wrapper'ы для новых команд
+async def queued_subscription(update, context):
+    await message_queue.add(update.effective_user.id, update, context, subscription_command)
+
+async def queued_connection(update, context):
+    await message_queue.add(update.effective_user.id, update, context, connection_command)
 
 async def queued_stats(update, context):
     await message_queue.add(update.effective_user.id, update, context, admin_stats)
@@ -1283,16 +1285,22 @@ async def main():
     application.add_handler(CommandHandler("project", queued_project))
     application.add_handler(CommandHandler("tariffs", queued_tariffs))
     application.add_handler(CommandHandler("reviews", queued_reviews))
+    # ИЗМЕНЕНО: Добавлены обработчики новых команд
+    application.add_handler(CommandHandler("subscription", queued_subscription))
+    application.add_handler(CommandHandler("connection", queued_connection))
     application.add_handler(CommandHandler("stats", queued_stats))
     application.add_handler(CallbackQueryHandler(queued_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, queued_message))
     application.add_error_handler(error_handler)
 
+    # ИЗМЕНЕНО: Обновлено меню команд (добавлены subscription и connection, убраны из кнопок)
     await application.bot.set_my_commands([
         BotCommand("start", "Начать работу"),
         BotCommand("project", "Описание проекта"),
         BotCommand("tariffs", "Тарифы"),
         BotCommand("reviews", "Отзывы"),
+        BotCommand("subscription", "Подписка"),      # НОВАЯ КОМАНДА
+        BotCommand("connection", "Связь со мной"),   # НОВАЯ КОМАНДА
         BotCommand("stats", "Статистика (админ)")
     ])
 
