@@ -534,7 +534,7 @@ async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await asyncio.sleep(0.5)
     await update.message.reply_text(
-        "Ты только посмотри на отзывы моих девочек 🥹"
+        "Ты только посмотри на отзывы моих девочек 🥹\n"
         "А это всего один месяц работы! ВАУ!!!\n"
         "Хочешь тоже так? Жми 👇",
         reply_markup=get_reviews_keyboard()
