@@ -171,9 +171,9 @@ def init_google_sheets():
             creds_file = google_creds_json
 
         SCOPE = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-            "https://www.googleapis.com/auth/spreadsheets"
+            "https://spreadsheets.google.com/feeds ",
+            "https://www.googleapis.com/auth/drive ",
+            "https://www.googleapis.com/auth/spreadsheets "
         ]
 
         CREDS = ServiceAccountCredentials.from_json_keyfile_name(creds_file, SCOPE)
@@ -181,7 +181,7 @@ def init_google_sheets():
         SHEET = CLIENT.open("Клиенты фитнес-бота").sheet1
 
         headers = SHEET.row_values(1)
-        expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Email", "Фамилия Имя", "Номер телефона", "Подписка до", "Статус", "ID платежа"]
+        expected_headers = ["ID", "Username", "Имя", "Рост", "Вес", "Калораж", "Дата", "Тариф", "Цена", "Email", "Фамилия Имя", "Номер телефона", "Подписка до", "Статус", "ID платежа"]
 
         if not headers:
             SHEET.append_row(expected_headers)
@@ -290,7 +290,6 @@ def get_main_menu_keyboard():
 
 def get_tariffs_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("3 дня (10 ₽)", callback_data='tariff_3')],
         [InlineKeyboardButton("15 дней (1990 ₽)", callback_data='tariff_15')],
         [InlineKeyboardButton("1 месяц (3000 ₽)", callback_data='tariff_30')],
         [InlineKeyboardButton("3 месяца (6990 ₽)", callback_data='tariff_90')]
@@ -335,7 +334,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg"
+    photo_url = "https://i.ibb.co/pr4CxkkM/1.jpg "
     caption = (
         "«POLINAFIT» — место, где ты обретёшь новую версию себя! 💫\n\n"
         "Проект — это не краткосрочный марафон. Это про индивидуальный подход к каждой участнице!\n\n"
@@ -426,7 +425,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -458,7 +457,7 @@ async def send_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def tariffs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg"
+    photo_url = "https://i.ibb.co/F9mRf4f/Tarif.jpg "
     caption = (
         "В проекте действует подписка, которая открывает тебе доступ к следующим преимуществам:\n\n"
         "🤍 Анализ состояния для подбора питания и тренировок\n"
@@ -485,15 +484,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -514,15 +513,15 @@ async def send_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reviews_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_photos = [
-        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg",
-        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg",
-        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg",
-        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg",
-        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg",
-        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg",
-        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg",
-        "https://i.ibb.co/394skJ6t/Otziv-5.jpg",
-        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg"
+        "https://i.ibb.co/N6yx0vQ7/Otziv-foto.jpg ",
+        "https://i.ibb.co/qLgkfHqk/Otziv-foto-2.jpg ",
+        "https://i.ibb.co/zWxK49Xb/Otziv-foto-1.jpg ",
+        "https://i.ibb.co/HD66d5vd/Otziv-1.jpg ",
+        "https://i.ibb.co/mVrGJPWs/Otziv-2.jpg ",
+        "https://i.ibb.co/G3B9Fpt3/Otziv-3.jpg ",
+        "https://i.ibb.co/xSDjZs9F/Otziv-4.jpg ",
+        "https://i.ibb.co/394skJ6t/Otziv-5.jpg ",
+        "https://i.ibb.co/ccRXCJ6p/Otziv.jpg "
     ]
 
     for i, url in enumerate(review_photos[:5]):
@@ -615,7 +614,6 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
 
     tariff_map = {
-        'tariff_3': {'name': '3 дня (10 ₽)', 'price': 10, 'days': 3},
         'tariff_15': {'name': '15 дней (1990 ₽)', 'price': 1990, 'days': 15},
         'tariff_30': {'name': '1 месяц (3000 ₽)', 'price': 3000, 'days': 30},
         'tariff_90': {'name': '3 месяца (6990 ₽)', 'price': 6990, 'days': 90}
@@ -829,6 +827,7 @@ async def process_successful_payment(order_id: str, payment_info: dict, query, c
                 '',
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 payment_info['tariff'],
+                str(payment_info['amount']),  # <-- Цена добавлена здесь
                 payment_info['email'],
                 payment_info.get('fullname', ''),
                 payment_info.get('phone', ''),
@@ -908,8 +907,8 @@ async def handle_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дорогая, я рада тебя приветствовать в проекте POLINAFIT 🥳\n"
         "Поздравляю, ты на шаг к своему идеальному телу! ✨\n\n"
         "Для того, чтобы нам структурировано продолжить работать, вот что нужно сделать:\n\n"
-        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky  \n"
-        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy   \n"
+        "1️⃣ Вступи в ЧАТ ПОДДЕРЖКИ, где будут все участницы проекта: https://t.me/+Jbb_WAbbePM2Mzky   \n"
+        "2️⃣ Зайди и подпишись на закрытый канал с материалами проекта: https://t.me/+UZosO3IIMoI4MDYy    \n"
         "3️⃣ Нажми в канале на закрепленное  сообщение «НАВИГАЦИЯ»\n"
         "4️⃣ Перейди по кнопке «АНКЕТА ДЛЯ ВСТУПЛЕНИЯ В ПРОЕКТ»\n"
         "5️⃣ Скопируй анкету и вставь её в ЛИЧНЫЙ ЧАТ со мной (@polinanekarpovaa)\n"
@@ -930,7 +929,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         'tariffs': send_tariffs,
         'reviews': send_reviews,
         'main_menu': send_main_menu,
-        'tariff_3': lambda u, c: handle_tariff_selection(u, c, 'tariff_3'),
         'tariff_15': lambda u, c: handle_tariff_selection(u, c, 'tariff_15'),
         'tariff_30': lambda u, c: handle_tariff_selection(u, c, 'tariff_30'),
         'tariff_90': lambda u, c: handle_tariff_selection(u, c, 'tariff_90'),
@@ -1210,7 +1208,7 @@ async def run_web_server():
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     logger.info(f"✅ Web сервер запущен на порту {PORT}")
-    logger.info(f"✅ Health check: http://0.0.0.0:{PORT}/health")
+    logger.info(f"✅ Health check: http://0.0.0.0: {PORT}/health")
 
 async def queued_start(update, context):
     await message_queue.add(update.effective_user.id, update, context, start)
